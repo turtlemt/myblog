@@ -2351,7 +2351,7 @@ function comment_form( $args = array(), $post_id = null ) {
 						 */
 						echo apply_filters( 'comment_form_field_comment', $args['comment_field'] );
 						?>
-						<?php echo $args['comment_notes_after']; ?>
+						<?php /*echo $args['comment_notes_after'];*/ ?>
 
 						<?php
 						$submit_button = sprintf(
