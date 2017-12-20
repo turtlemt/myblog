@@ -1,184 +1,125 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbCheck' ) ) {
 
 	class NgfbCheck {
 
 		private $p;
-		private $active_plugins = array();
-
 		private static $c = array();
-		private static $extend_checks = array(
+		private static $extend_lib_checks = array(
 			'seo' => array(
 				'seou' => 'SEO Ultimate',
-			),
-			'util' => array(
-				'um' => 'Pro Update Manager',
+				'sq' => 'Squirrly SEO',
 			),
 		);
 
 		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
-
-			if ( is_object( $this->p->debug ) && 
-				method_exists( $this->p->debug, 'mark' ) )
-					$this->p->debug->mark();
-
-			$this->active_plugins = NgfbUtil::active_plugins();
-
-			if ( ! is_admin() ) {
-				// disable jetPack open graph meta tags
-				if ( class_exists( 'JetPack' ) || 
-					isset( $this->active_plugins['jetpack/jetpack.php'] ) ) {
-
-					add_filter( 'jetpack_enable_opengraph', '__return_false', 99 );
-					add_filter( 'jetpack_enable_open_graph', '__return_false', 99 );
-					add_filter( 'jetpack_disable_twitter_cards', '__return_true', 99 );
-				}
-	
-				// disable Yoast SEO social meta tags
-				if ( function_exists( 'wpseo_init' ) || 
-					isset( $this->active_plugins['wordpress-seo/wp-seo.php'] ) )
-						add_action( 'template_redirect', array( $this, 'cleanup_wpseo_filters' ), 9999 );
-			}
-			do_action( $this->p->cf['lca'].'_init_check', $this->active_plugins );
-		}
-
-		public function cleanup_wpseo_filters() {
-
-			if ( isset( $GLOBALS['wpseo_og'] ) && is_object( $GLOBALS['wpseo_og'] ) && 
-				( $prio = has_action( 'wpseo_head', array( $GLOBALS['wpseo_og'], 'opengraph' ) ) ) !== false )
-					$ret = remove_action( 'wpseo_head', array( $GLOBALS['wpseo_og'], 'opengraph' ), $prio );
-
-			if ( class_exists( 'WPSEO_Twitter' ) &&
-				( $prio = has_action( 'wpseo_head', array( 'WPSEO_Twitter', 'get_instance' ) ) ) !== false )
-					$ret = remove_action( 'wpseo_head', array( 'WPSEO_Twitter', 'get_instance' ), $prio );
-
-			if ( class_exists( 'WPSEO_GooglePlus' ) && 
-				( $prio = has_action( 'wpseo_head', array( 'WPSEO_GooglePlus', 'get_instance' ) ) ) !== false )
-					$ret = remove_action( 'wpseo_head', array( 'WPSEO_GooglePlus', 'get_instance' ), $prio );
-
-			if ( ! empty( $this->p->options['seo_publisher_url'] ) && isset( WPSEO_Frontend::$instance ) &&
-				 ( $prio = has_action( 'wpseo_head', array( WPSEO_Frontend::$instance, 'publisher' ) ) ) )
-					$ret = remove_action( 'wpseo_head', array( WPSEO_Frontend::$instance, 'publisher' ), $prio );
-
-			if ( ! empty( $this->p->options['schema_website_json'] ) )
-				add_filter( 'wpseo_json_ld_output', '__return_empty_array', 99 );
-		}
-
-		private function get_avail_check( $key ) {
-			switch ( $key ) {
-				case 'aop':
-					$ret = ! SucomUtil::get_const( 'NGFB_PRO_MODULE_DISABLE' ) &&
-					is_dir( NGFB_PLUGINDIR.'lib/pro/' ) ? true : false;
-					break;
-				case 'mt':
-					$ret = ! SucomUtil::get_const( 'NGFB_META_TAGS_DISABLE' ) &&
-					empty( $_SERVER['NGFB_META_TAGS_DISABLE'] ) &&
-					empty( $_GET['NGFB_META_TAGS_DISABLE'] ) ? true : false;	// allow meta tags to be disabled with query argument
-					break;
-				case 'ssb':
-					$ret = ! SucomUtil::get_const( 'NGFB_SOCIAL_SHARING_DISABLE' ) &&
-					empty( $_SERVER['NGFB_SOCIAL_SHARING_DISABLE'] ) &&
-					class_exists( $this->p->cf['lca'].'sharing' ) ? true : false;
-					break;
-				default:
-					$ret = false;
-					break;
-			}
-			return $ret;
 		}
 
 		public function get_avail() {
-			$ret = array();
+
+			$avail = array();
 			$is_admin = is_admin();
 
-			$ret['curl'] = function_exists( 'curl_init' ) ? true : false;
-			$ret['postthumb'] = function_exists( 'has_post_thumbnail' ) ? true : false;
-			$ret['mbstring'] = extension_loaded( 'mbstring' ) ? true : false;
-
-			foreach ( array( 'aop', 'mt', 'ssb' ) as $key )
-				$ret[$key] = $this->get_avail_check( $key );
-
-			foreach ( $this->p->cf['cache'] as $name => $val ) {
-				$constant_name = 'NGFB_'.strtoupper( $name ).'_CACHE_DISABLE';
-				$ret['cache'][$name] = defined( $constant_name ) &&
-					constant( $constant_name ) ? false : true;
+			foreach ( array( 'featured', 'amp', 'p_dir', 'head_html', 'ssb', 'vary_ua' ) as $key ) {
+				$avail['*'][$key] = $this->is_avail( $key );
 			}
 
-			foreach ( SucomUtil::array_merge_recursive_distinct( $this->p->cf['*']['lib']['pro'], 
-				self::$extend_checks ) as $sub => $lib ) {
+			$avail['p_ext']['ssb'] =& $avail['*']['ssb'];	// required for compatibility
 
-				$ret[$sub] = array();
-				$ret[$sub]['*'] = false;
+			$lib_checks = SucomUtil::array_merge_recursive_distinct( $this->p->cf['*']['lib']['pro'], self::$extend_lib_checks );
+
+			foreach ( $lib_checks as $sub => $lib ) {
+
+				$avail[$sub] = array();
+				$avail[$sub]['*'] = false;
+
 				foreach ( $lib as $id => $name ) {
+
 					$chk = array();
-					$ret[$sub][$id] = false;	// default value
+					$avail[$sub][$id] = false;	// default value
+
 					switch ( $sub.'-'.$id ) {
 						/*
 						 * 3rd Party Plugins
+						 *
+						 * Prefer to check for class names than plugin slugs for 
+						 * compatibility with free / premium / pro versions.
 						 */
 						case 'ecom-edd':
 							$chk['class'] = 'Easy_Digital_Downloads';
-							$chk['plugin'] = 'easy-digital-downloads/easy-digital-downloads.php';
 							break;
 						case 'ecom-marketpress':
-							$chk['class'] = 'MarketPress';
-							$chk['plugin'] = 'wordpress-ecommerce/marketpress.php';
+							$chk['class'] = 'Marketpress';
 							break;
 						case 'ecom-woocommerce':
-							$chk['class'] = 'Woocommerce';
-							$chk['plugin'] = 'woocommerce/woocommerce.php';
+							$chk['class'] = 'WooCommerce';
 							break;
 						case 'ecom-wpecommerce':
 							$chk['class'] = 'WP_eCommerce';
-							$chk['plugin'] = 'wp-e-commerce/wp-shopping-cart.php';
 							break;
-						case 'ecom-yotpowc':	// yotpo-social-reviews-for-woocommerce
+						case 'ecom-yotpowc':					// yotpo-social-reviews-for-woocommerce
 							$chk['function'] = 'wc_yotpo_init';
 							break;
+						case 'event-tribe_events':
+							$chk['class'] = 'Tribe__Events__Main';
+							break;
+						case 'form-gravityforms':
+							$chk['class'] = 'GFForms';
+							break;
+						case 'form-gravityview':
+							$chk['class'] = 'GravityView_Plugin';
+							break;
 						case 'forum-bbpress':
-							$chk['class'] = 'bbPress';
 							$chk['plugin'] = 'bbpress/bbpress.php';
 							break;
 						case 'lang-polylang':
 							$chk['class'] = 'Polylang';
-							$chk['plugin'] = 'polylang/polylang.php';
 							break;
 						case 'media-ngg':
-							$chk['class'] = 'nggdb';	// C_NextGEN_Bootstrap
+							$chk['class'] = 'nggdb';
 							$chk['plugin'] = 'nextgen-gallery/nggallery.php';
 							break;
+						case 'media-rtmedia':
+							$chk['plugin'] = 'buddypress-media/index.php';
+							break;
 						case 'seo-aioseop':
-							$chk['class'] = 'All_in_One_SEO_Pack';
+							$chk['function'] = 'aioseop_init_class';	// free and pro versions
+							break;
+						case 'seo-autodescription':
+							$chk['plugin'] = 'autodescription/autodescription.php';
 							break;
 						case 'seo-headspace2':
 							$chk['class'] = 'HeadSpace_Plugin';
-							$chk['plugin'] = 'headspace2/headspace.php';
 							break;
 						case 'seo-seou':
-							$chk['class'] = 'SEO_Ultimate';
 							$chk['plugin'] = 'seo-ultimate/seo-ultimate.php';
 							break;
+						case 'seo-sq':
+							$chk['plugin'] = 'squirrly-seo/squirrly.php';
+							break;
 						case 'seo-wpseo':
-							$chk['function'] = 'wpseo_init';
-							$chk['plugin'] = 'wordpress-seo/wp-seo.php';
+							$chk['function'] = 'wpseo_init';		// free and premium versions
 							break;
 						case 'social-buddypress':
-							$chk['class'] = 'BuddyPress';
 							$chk['plugin'] = 'buddypress/bp-loader.php';
 							break;
 						/*
 						 * Pro Version Features / Options
 						 */
+						case 'media-facebook':
+							$chk['optval'] = 'plugin_facebook_api';
+							break;
 						case 'media-gravatar':
 							$chk['optval'] = 'plugin_gravatar_api';
 							break;
@@ -202,25 +143,32 @@ if ( ! class_exists( 'NgfbCheck' ) ) {
 							// only load on the settings pages
 							if ( $is_admin ) {
 								$page = basename( $_SERVER['PHP_SELF'] );
-								if ( $page === 'admin.php' || $page === 'options-general.php' )
-									$ret[$sub]['*'] = $ret[$sub][$id] = true;
+								if ( $page === 'admin.php' || $page === 'options-general.php' ) {
+									$avail[$sub]['*'] = $avail[$sub][$id] = true;
+								}
 							}
 							break;
 						case 'admin-post':
-						case 'admin-taxonomy':
-						case 'admin-user':
-							if ( $is_admin )
-								$ret[$sub]['*'] = $ret[$sub][$id] = true;
+						case 'admin-meta':
+							if ( $is_admin ) {
+								$avail[$sub]['*'] = $avail[$sub][$id] = true;
+							}
 							break;
 						case 'admin-sharing':
-						case 'admin-style':
-							if ( $is_admin && $ret['ssb'] === true )
-								$ret[$sub]['*'] = $ret[$sub][$id] = true;
+							if ( $is_admin && $avail['*']['ssb'] ) {
+								$avail[$sub]['*'] = $avail[$sub][$id] = true;
+							}
+							break;
+						case 'util-checkimgdims':
+							$chk['optval'] = 'plugin_check_img_dims';
+							break;
+						case 'util-coauthors':
+							$chk['plugin'] = 'co-authors-plus/co-authors-plus.php';
 							break;
 						case 'util-post':
-						case 'util-taxonomy':
+						case 'util-term':
 						case 'util-user':
-							$ret[$sub]['*'] = $ret[$sub][$id] = true;
+							$avail[$sub]['*'] = $avail[$sub][$id] = true;
 							break;
 						case 'util-language':
 							$chk['optval'] = 'plugin_filter_lang';
@@ -231,71 +179,126 @@ if ( ! class_exists( 'NgfbCheck' ) ) {
 						case 'util-shorten':
 							$chk['optval'] = 'plugin_shortener';
 							break;
-						case 'util-um':
-							$chk['class'] = 'NgfbUm';
-							$chk['plugin'] = 'nextgen-facebook-um/nextgen-facebook-um.php';
+						case 'util-wpseo_meta':
+							$chk['optval'] = 'plugin_wpseo_social_meta';
 							break;
 					}
+
 					if ( ! empty( $chk ) ) {
-						if ( isset( $chk['plugin'] ) || isset( $chk['class'] ) || isset( $chk['function'] ) ) {
-							if ( ( ! empty( $chk['plugin'] ) && isset( $this->active_plugins[$chk['plugin']] ) ) ||
-								( ! empty( $chk['class'] ) && class_exists( $chk['class'] ) ) ||
-								( ! empty( $chk['function'] ) && function_exists( $chk['function'] ) ) ) {
+						// check class / function first to include both free and pro / premium plugins
+						if ( isset( $chk['class'] ) || isset( $chk['function'] ) || isset( $chk['plugin'] ) ) {
+
+							if ( ( ! empty( $chk['class'] ) && class_exists( $chk['class'] ) ) ||
+								( ! empty( $chk['function'] ) && function_exists( $chk['function'] ) ) ||
+								( ! empty( $chk['plugin'] ) && SucomUtil::active_plugins( $chk['plugin'] ) ) ) {
 
 								// check if an option value is also required
 								if ( isset( $chk['optval'] ) ) {
-									if ( $this->has_optval( $chk['optval'] ) )
-										$ret[$sub]['*'] = $ret[$sub][$id] = true;
-								} else $ret[$sub]['*'] = $ret[$sub][$id] = true;
+									if ( $this->has_optval( $chk['optval'] ) ) {
+										$avail[$sub]['*'] = $avail[$sub][$id] = true;
+									}
+								} else {
+									$avail[$sub]['*'] = $avail[$sub][$id] = true;
+								}
 							}
 						} if ( isset( $chk['optval'] ) ) {
-							if ( $this->has_optval( $chk['optval'] ) )
-								$ret[$sub]['*'] = $ret[$sub][$id] = true;
+							if ( $this->has_optval( $chk['optval'] ) ) {
+								$avail[$sub]['*'] = $avail[$sub][$id] = true;
+							}
 						}
 					}
 				}
 			}
-			return apply_filters( $this->p->cf['lca'].'_get_avail', $ret );
+			return apply_filters( $this->p->lca.'_get_avail', $avail );
 		}
 
-		private function has_optval( $opt_name ) { 
-			if ( ! empty( $opt_name ) && 
-				! empty( $this->p->options[$opt_name] ) && 
-					$this->p->options[$opt_name] !== 'none' )
-						return true;
+		// private method to check for availability of specific features by keyword
+		private function is_avail( $key ) {
+			$is_avail = false;
+			switch ( $key ) {
+				case 'featured':
+					$is_avail = function_exists( 'has_post_thumbnail' ) ?
+						true : false;
+					break;
+				case 'amp':
+					$is_avail = function_exists( 'is_amp_endpoint' ) ?
+						true : false;
+					break;
+				case 'p_dir':
+					$is_avail = ! SucomUtil::get_const( 'NGFB_PRO_MODULE_DISABLE' ) &&
+						is_dir( NGFB_PLUGINDIR.'lib/pro/' ) ?
+							true : false;
+					break;
+				case 'head_html':
+					$is_avail = ! SucomUtil::get_const( 'NGFB_HEAD_HTML_DISABLE' ) &&
+						empty( $_SERVER['NGFB_HEAD_HTML_DISABLE'] ) &&
+							empty( $_GET['NGFB_HEAD_HTML_DISABLE'] ) ?
+								true : false;
+					break;
+				case 'ssb':
+					$is_avail = ! SucomUtil::get_const( 'NGFB_SOCIAL_SHARING_DISABLE' ) &&
+						empty( $_SERVER['NGFB_SOCIAL_SHARING_DISABLE'] ) &&
+							class_exists( $this->p->lca.'sharing' ) ?
+								true : false;
+					break;
+				case 'vary_ua':
+					$is_avail = ! SucomUtil::get_const( 'NGFB_VARY_USER_AGENT_DISABLE' ) ?
+						true : false;
+					break;
+			}
+			return $is_avail;
 		}
 
-		public function is_aop( $lca = '' ) { 
-			return $this->aop( $lca, true, $this->get_avail_check( 'aop' ) );
+		public function is_aop( $lca = '', $uc = true ) {
+			return $this->aop( $lca, true, ( isset( $this->p->avail['*']['p_dir'] ) ?
+				$this->p->avail['*']['p_dir'] : $this->is_avail( 'p_dir' ) ), $uc );
 		}
 
-		public function aop( $lca = '', $lic = true, $rv = true ) {
-			$lca = empty( $lca ) ? 
-				$this->p->cf['lca'] : $lca;
+		public function aop( $lca = '', $lic = true, $rv = true, $uc = true ) {
+			$lca = empty( $lca ) ? $this->p->lca : $lca;
 			$kn = $lca.'-'.$lic.'-'.$rv;
-			if ( isset( self::$c[$kn] ) )
+			if ( $uc && isset( self::$c[$kn] ) )
 				return self::$c[$kn];
 			$uca = strtoupper( $lca );
-			if ( defined( $uca.'_PLUGINDIR' ) )
+			if ( defined( $uca.'_PLUGINDIR' ) ) {
 				$pdir = constant( $uca.'_PLUGINDIR' );
-			elseif ( isset( $this->p->cf['plugin'][$lca]['slug'] ) ) {
+			} elseif ( isset( $this->p->cf['plugin'][$lca]['slug'] ) ) {
 				$slug = $this->p->cf['plugin'][$lca]['slug'];
-				if ( ! defined ( 'WPMU_PLUGIN_DIR' ) || 
+				if ( ! defined ( 'WPMU_PLUGIN_DIR' ) ||
 					! is_dir( $pdir = WPMU_PLUGIN_DIR.'/'.$slug.'/' ) ) {
-					if ( ! defined ( 'WP_PLUGIN_DIR' ) || 
+					if ( ! defined ( 'WP_PLUGIN_DIR' ) ||
 						! is_dir( $pdir = WP_PLUGIN_DIR.'/'.$slug.'/' ) )
 							return self::$c[$kn] = false;
 				}
 			} else return self::$c[$kn] = false;
 			$on = 'plugin_'.$lca.'_tid';
 			$ins = is_dir( $pdir.'lib/pro/' ) ? $rv : false;
-			return self::$c[$kn] = $lic === true ? 
-				( ( ! empty( $this->p->options[$on] ) && 
+			return self::$c[$kn] = $lic === true ?
+				( ( ! empty( $this->p->options[$on] ) &&
 					$ins && class_exists( 'SucomUpdate' ) &&
-						( $um = SucomUpdate::get_umsg( $lca ) ? 
-							false : $ins ) ) ? $um : false ) : $ins;
+						( $uerr = SucomUpdate::get_umsg( $lca ) ?
+							false : $ins ) ) ? $uerr : false ) : $ins;
+		}
+
+		public function get_ext_list() {
+			$ext_list = array();
+			foreach ( $this->p->cf['plugin'] as $ext => $info ) {
+				if ( empty( $info['version'] ) ) {	// only active extensions
+					continue;
+				}
+				$ins = $this->aop( $ext, false );
+				$ext_list[] = $info['short'].( $ins ? ' Pro' : '' ).' '.$info['version'].'/'.
+					( $this->is_aop( $ext ) ? 'L' : ( $ins ? 'U' : 'G' ) );
+			}
+			return $ext_list;
+		}
+
+		private function has_optval( $opt_name ) {
+			if ( ! empty( $opt_name ) &&
+				! empty( $this->p->options[$opt_name] ) &&
+					$this->p->options[$opt_name] !== 'none' )
+						return true;
 		}
 	}
 }
 
-?>

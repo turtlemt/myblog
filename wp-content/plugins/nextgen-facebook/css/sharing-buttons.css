@@ -1,35 +1,35 @@
-/* Save an empty style text box to reload the default example styles.
- * These styles are provided as examples only - modifications may be 
- * necessary to customize the layout for your website. Social sharing
- * buttons can be aligned vertically, horizontally, floated, etc.
+/*
+ * Save an empty style text box to reload the default example styles.
+ * These styles are provided as examples only - modifications may be
+ * necessary to customize the layout for your website.
  */
 
 /* make sure the Facebook flyout does not get clipped */
 #page { overflow:visible; }
 
-/* The .ngfb-buttons class is common to all other button classes
+/*
+ * The .ngfb-buttons class is common to all other button classes
  * (excerpt, content, shortcode, widget). Any change made to this
  * class will affect all other button layouts.
  */
-.ngfb-buttons { 
+.ngfb-buttons {
+	visibility:visible;
 	box-sizing:content-box;
 }
-.ngfb-buttons img { 
+.ngfb-buttons img {
 	margin:none;
 	border:none;
 }
-
 .ngfb-buttons img:hover {
 	border:none;
 }
-
-.ngfb-buttons iframe { 
-	margin:0;
+.ngfb-buttons iframe {
+	margin:0 !important;
 	max-width:none;
+	vertical-align:baseline;
 }
-
 .ngfb-buttons > div,		/* default uses small buttons */
-.ngfb-preset-small_share_count .ngfb-buttons > div { 
+.ngfb-preset-small_share_count .ngfb-buttons > div {
 	display:inline-block;
 	vertical-align:bottom;
 	text-align:left;
@@ -39,78 +39,187 @@
 	width:100px;
 	height:20px;
 }
-
 .ngfb-preset-large_share_vertical .ngfb-buttons > div,
-.ngfb-preset-large_share_vertical .ngfb-buttons > div[class*="-button"] { 
+.ngfb-preset-large_share_vertical .ngfb-buttons > div[class*="-button"] {
 	line-height:61px;
 	width:70px;
 	height:61px;
 }
 
-.ngfb-buttons div.facebook-button,
-.ngfb-preset-small_share_count
-	.ngfb-buttons div.facebook-button { width:139px; }
+/* Facebook Button */
 
+.ngfb-buttons div.facebook-button,		/* English (Default) */
+.ngfb-preset-small_share_count .ngfb-buttons div.facebook-button {
+	width:114px;
+}
+.ngfb-buttons.cs_CZ div.facebook-button,	/* Czech */
+.ngfb-preset-small_share_count .ngfb-buttons.cs_CZ div.facebook-button {
+	width:144px;
+}
 .ngfb-buttons div.fb-share-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.fb-share-button { width:105px; }
-
+.ngfb-preset-small_share_count .ngfb-buttons div.fb-share-button {
+	width:90px;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.fb-share-button {
+	height:40px;
+	line-height:40px;
+}
 .ngfb-buttons div.fb-share-button span {
 	display:inline-block	!important;
-	vertical-align:middle	!important;
 }
 
+/* Google+ Button */
+
 .ngfb-buttons div.gplus-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.gplus-button { 
+.ngfb-preset-small_share_count .ngfb-buttons div.gplus-button {
 	width:99px;
 	vertical-align:top;
 }
-
 .ngfb-buttons div.gplusone-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.gplusone-button { 
-	width:75px; 
+.ngfb-preset-small_share_count .ngfb-buttons div.gplusone-button {
+	width:75px;
 	line-height:10px;
 	vertical-align:top;
 }
 
+/* Twitter Button */
+
 .ngfb-buttons div.twitter-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.twitter-button,
-.ngfb-preset-large_share_vertical 
-	.ngfb-buttons div.twitter-button {
+.ngfb-preset-small_share_count .ngfb-buttons div.twitter-button,
+.ngfb-preset-large_share_vertical .ngfb-buttons div.twitter-button {
 	width:61px;
 	height:20px;
 	line-height:20px;
 	vertical-align:top;
 }
 
+/* LinkedIn Button */
+
 .ngfb-buttons div.linkedin-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.linkedin-button { width:110px; }
+.ngfb-preset-small_share_count .ngfb-buttons div.linkedin-button {
+	width:110px;
+}
+
+/* Pinterest Button */
 
 .ngfb-buttons div.pinterest-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.pinterest-button { width:78px; }
-.ngfb-preset-large_share_vertical 
-	.ngfb-buttons div.pinterest-button { height:40px; margin-top:42px; }
+.ngfb-preset-small_share_count .ngfb-buttons div.pinterest-button {
+	width:85px;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.pinterest-button {
+	height:40px;
+	margin-top:35px;
+}
+
+/* Reddit Button */
 
 .ngfb-buttons div.reddit-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.reddit-button { width:130px; }
-.ngfb-preset-large_share_vertical 
-	.ngfb-buttons div.reddit-button { margin-bottom:10px; }
+.ngfb-preset-small_share_count .ngfb-buttons div.reddit-button {
+	width:130px;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.reddit-button {
+	margin-bottom:10px;
+}
+
+/* StumbleUpon Button */
 
 .ngfb-buttons div.stumbleupon-button,
-.ngfb-preset-small_share_count
-	.ngfb-buttons div.stumbleupon-button { width:84px; }
-.ngfb-preset-large_share_vertical
-	.ngfb-buttons div.stumbleupon-button { height:60px; line-height:60px; }
+.ngfb-preset-small_share_count .ngfb-buttons div.stumbleupon-button {
+	width:84px;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.stumbleupon-button {
+	height:60px;
+	line-height:60px;
+}
+
+/* Tumblr Button */
 
 .ngfb-buttons div.tumblr-button,
-.ngfb-preset-small_share_count 
-	.ngfb-buttons div.tumblr-button { width:85px; }
-.ngfb-preset-large_share_vertical 
-	.ngfb-buttons div.tumblr-button { height:20px; line-height:20px; }
+.ngfb-preset-small_share_count .ngfb-buttons div.tumblr-button {
+	width:85px;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.tumblr-button {
+	height:40px;
+}
+
+/*
+ * Non-JavaScript Buttons
+ */
+
+.ngfb-buttons div.css-button a {
+	display:inline-block;
+	line-height:20px;
+	width:60px;
+	font-size:10px;
+	border-radius:3px;
+	text-align:center;
+	text-decoration:none;
+	vertical-align:top;
+	border:0.5px solid #ddd;
+	box-shadow:none;
+	-webkit-box-shadow:none;
+	-webkit-font-smoothing:antialiased;
+	-moz-osx-font-smoothing:grayscale;
+}
+
+.ngfb-buttons div.css-button a .ngfb-icon {
+	fill:#ffffff;
+	vertical-align:bottom;
+}
+
+.ngfb-buttons div.css-button a .ngfb-text {
+	color:#ffffff;
+	white-space:nowrap;
+	font-weight:bold;
+}
+
+/* E-Mail Button */
+
+.ngfb-buttons div.email-button,
+.ngfb-preset-small_share_count .ngfb-buttons div.email-button {
+	width:62px;
+}
+.ngfb-buttons div.email-button a,
+.ngfb-preset-small_share_count .ngfb-buttons div.email-button a {
+	width:62px;
+	background-color:#0a88ff;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.email-button {
+	height:20px !important;
+}
+.ngfb-buttons div.email-button a:hover {
+	background-color:#006ed6;
+}
+.ngfb-buttons div.email-button a .ngfb-text:before {
+	content:" E-Mail";
+}
+
+/* WhatsApp Button */
+
+.ngfb-buttons div.whatsapp-button,
+.ngfb-preset-small_share_count .ngfb-buttons div.whatsapp-button {
+	width:80px;
+}
+.ngfb-buttons div.whatsapp-button a,
+.ngfb-preset-small_share_count .ngfb-buttons div.whatsapp-button a {
+	width:80px;
+	background-color:#64d448;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.whatsapp-button {
+	height:55px !important;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.whatsapp-button a {
+	width:60px;
+}
+.ngfb-preset-large_share_vertical .ngfb-buttons div.whatsapp-button a .ngfb-icon svg {
+	width:auto;
+	height:22px;
+	margin:5px 0 0 0;
+}
+.ngfb-buttons div.whatsapp-button a:hover {
+	background-color:#49bd2c;
+}
+.ngfb-buttons div.whatsapp-button a .ngfb-text:before {
+	content:" WhatsApp";
+}
 

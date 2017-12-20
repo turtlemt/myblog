@@ -1,12 +1,13 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbGplUtilUser' ) && class_exists( 'NgfbUser' ) ) {
 
@@ -14,20 +15,34 @@ if ( ! class_exists( 'NgfbGplUtilUser' ) && class_exists( 'NgfbUser' ) ) {
 
 		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
-			if ( $this->p->debug->enabled )
+
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->mark();
+			}
+
 			$this->add_actions();
 		}
 
-		public function get_meta_image( $num = 0, $size_name = 'thumbnail', $id,
-			$check_dupes = true, $force_regen = false, $md_pre = 'og', $mt_pre = 'og' ) {
+		/*
+		 * The Free version does not have any code to get / save meta data, nor
+		 * does it have any video API modules, so optimize and disable some methods
+		 * that wouldn't return anything anyway. ;-)
+		 */
+		public function get_options_multi( $mod_id, $idx = false, $filter_opts = true ) {
+			return $this->not_implemented( __METHOD__, ( $idx === false ? false : null ) );
+		}
+
+		public function get_md_images( $num, $size_name, array $mod, $check_dupes = true, $force_regen = false, $md_pre = 'og', $mt_pre = 'og' ) {
 			return $this->not_implemented( __METHOD__, array() );
 		}
 
-		public function get_og_video( $num = 0, $id, $check_dupes = false, $md_pre = 'og', $mt_pre = 'og' ) {
+		public function get_og_images( $num, $size_name, $mod_id, $check_dupes = true, $force_regen = false, $md_pre = 'og' ) {
+			return $this->not_implemented( __METHOD__, array() );
+		}
+
+		public function get_og_videos( $num, $mod_id, $check_dupes = false, $md_pre = 'og', $mt_pre = 'og' ) {
 			return $this->not_implemented( __METHOD__, array() );
 		}
 	}
 }
 
-?>

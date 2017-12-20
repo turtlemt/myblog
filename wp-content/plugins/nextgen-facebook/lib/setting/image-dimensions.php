@@ -1,77 +1,93 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbSettingImagedimensions' ) && class_exists( 'NgfbAdmin' ) ) {
 
 	class NgfbSettingImagedimensions extends NgfbAdmin {
 
-		public function __construct( &$plugin, $id, $name, $lib ) {
+		public function __construct( &$plugin, $id, $name, $lib, $ext ) {
 			$this->p =& $plugin;
-			if ( $this->p->debug->enabled )
+
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->mark();
+			}
+
 			$this->menu_id = $id;
 			$this->menu_name = $name;
 			$this->menu_lib = $lib;
+			$this->menu_ext = $ext;	// lowercase acronyn for plugin or extension
 		}
 
+		protected function add_plugin_hooks() {
+			$this->p->util->add_plugin_filters( $this, array(
+				'action_buttons' => 1,
+			) );
+		}
+
+		// called by the extended NgfbAdmin class
 		protected function add_meta_boxes() {
-			// add_meta_box( $id, $title, $callback, $post_type, $context, $priority, $callback_args );
 			add_meta_box( $this->pagehook.'_image_dimensions',
-				_x( 'Social Image Dimensions', 'metabox title', 'nextgen-facebook' ), 
+				_x( 'Image Dimensions', 'metabox title', 'nextgen-facebook' ),
 					array( &$this, 'show_metabox_image_dimensions' ), $this->pagehook, 'normal' );
 		}
 
-		public function show_metabox_image_dimensions() {
-			$metabox = $this->menu_id;
-			echo '<table class="sucom-setting '.$this->p->cf['lca'].'">';
-			echo '<tr><td colspan="2">'.$this->p->msgs->get( 'info-'.$metabox ).'</td></tr>';
+		public function filter_action_buttons( $action_buttons ) {
+			$action_buttons[0]['reload_default_sizes'] = _x( 'Reload Default Sizes',
+				'submit button', 'nextgen-facebook' );
+			return $action_buttons;
+		}
 
-			$rows = array_merge( $this->get_rows( $metabox, 'general' ), 
-				apply_filters( $this->p->cf['lca'].'_'.$metabox.'_general_rows',
+		public function show_metabox_image_dimensions() {
+			$metabox_id = $this->menu_id;
+			echo '<table class="sucom-settings '.$this->p->cf['lca'].'">';
+
+			$table_rows = array_merge( $this->get_table_rows( $metabox_id, 'general' ),
+				apply_filters( SucomUtil::sanitize_hookname( $this->p->cf['lca'].'_'.$metabox_id.'_general_rows' ),
 					array(), $this->form ) );
-			natsort( $rows );
-			foreach ( $rows as $num => $row ) 
+
+			sort( $table_rows );
+
+			foreach ( $table_rows as $num => $row ) {
 				echo '<tr>'.$row.'</tr>'."\n";
+			}
 			echo '</table>';
 		}
 
-		protected function get_rows( $metabox, $key ) {
-			$rows = array();
+		protected function get_table_rows( $metabox_id, $key ) {
+			$table_rows = array();
 
-			switch ( $metabox.'-'.$key ) {
+			switch ( $metabox_id.'-'.$key ) {
 
 				case 'image-dimensions-general':
 
-					$rows[] = $this->p->util->get_th( _x( 'Facebook / Open Graph',
+					$table_rows['og_img_dimensions'] = $this->form->get_th_html( _x( 'Facebook / Open Graph',
 						'option label', 'nextgen-facebook' ), null, 'og_img_dimensions' ).
-					'<td>'.$this->form->get_image_dimensions_input( 'og_img', false, false ).'</td>';
+					'<td>'.$this->form->get_input_image_dimensions( 'og_img' ).'</td>';	// $use_opts = false
 
-					if ( ! SucomUtil::get_const( 'NGFB_RICH_PIN_DISABLE' ) ) {
-						$rows[] = $this->p->util->get_th( _x( 'Pinterest Rich Pin',
-							'option label', 'nextgen-facebook' ), null, 'rp_img_dimensions' ).
-						'<td>'.$this->form->get_image_dimensions_input( 'rp_img' ).'</td>';
-					}
-	
-					$rows[] = $this->p->util->get_th( _x( 'Twitter <em>Summary</em> Card',
-						'option label', 'nextgen-facebook' ), null, 'tc_sum_dimensions' ).
-					'<td>'.$this->form->get_image_dimensions_input( 'tc_sum' ).'</td>';
-	
-					$rows[] = $this->p->util->get_th( _x( 'Twitter <em>Large Image Summary</em> Card',
-						'option label', 'nextgen-facebook' ), null, 'tc_lrgimg_dimensions' ).
-					'<td>'.$this->form->get_image_dimensions_input( 'tc_lrgimg' ).'</td>';
+					$table_rows['schema_img_dimensions'] = $this->form->get_th_html( _x( 'Google / Schema / Pinterest',
+						'option label', 'nextgen-facebook' ), null, 'schema_img_dimensions' ).
+					'<td>'.$this->form->get_input_image_dimensions( 'schema_img' ).'</td>';	// $use_opts = false
+
+					$table_rows['tc_sum_img_dimensions'] = $this->form->get_th_html( _x( 'Twitter <em>Summary</em> Card',
+						'option label', 'nextgen-facebook' ), null, 'tc_sum_img_dimensions' ).
+					'<td>'.$this->form->get_input_image_dimensions( 'tc_sum_img' ).'</td>';	// $use_opts = false
+
+					$table_rows['tc_lrg_img_dimensions'] = $this->form->get_th_html( _x( 'Twitter <em>Large Image Summary</em> Card',
+						'option label', 'nextgen-facebook' ), null, 'tc_lrg_img_dimensions' ).
+					'<td>'.$this->form->get_input_image_dimensions( 'tc_lrg_img' ).'</td>';	// $use_opts = false
 
 					break;
 			}
-			return $rows;
+			return $table_rows;
 		}
 	}
 }
 
-?>

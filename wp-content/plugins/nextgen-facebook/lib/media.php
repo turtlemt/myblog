@@ -1,101 +1,100 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbMedia' ) ) {
 
 	class NgfbMedia {
 
 		private $p;
-		private $default_img_preg = array(
+		private $def_img_preg = array(
 			'html_tag' => 'img',
 			'pid_attr' => 'data-[a-z]+-pid',
 			'ngg_src' => '[^\'"]+\/cache\/([0-9]+)_(crop)?_[0-9]+x[0-9]+_[^\/\'"]+|[^\'"]+-nggid0[1-f]([0-9]+)-[^\'"]+',
 		);
-
 		private static $image_src_info = null;
 
 		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
-			if ( $this->p->debug->enabled )
-				$this->p->debug->mark();
 
-			// prevent image_downsize() from lying about image width and height
-			if ( is_admin() )
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			add_action( 'init', array( &$this, 'allow_img_data_attributes' ) );
+
+			// prevent image_downsize from lying about image width and height
+			if ( is_admin() ) {
 				add_filter( 'editor_max_image_size', array( &$this, 'editor_max_image_size' ), 10, 3 );
+			}
 
 			add_filter( 'wp_get_attachment_image_attributes', array( &$this, 'add_attachment_image_attributes' ), 10, 2 );
-			add_filter( 'get_image_tag', array( &$this, 'add_image_tag' ), 10, 6 );
+			add_filter( 'get_image_tag', array( &$this, 'get_image_tag' ), 10, 6 );
+			add_filter( 'get_header_image_tag', array( &$this, 'get_header_image_tag' ), 10, 3 );
+		}
+
+		public function allow_img_data_attributes() {
+			global $allowedposttags;
+			$allowedposttags['img']['data-wp-pid'] = true;
+			if ( ! empty( $this->p->options['p_add_nopin_media_img_tag'] ) ) {
+				$allowedposttags['img']['nopin'] = true;
+			}
 		}
 
 		// note that $size_name can be a string or an array()
 		public function editor_max_image_size( $max_sizes = array(), $size_name = '', $context = '' ) {
 			// allow only our sizes to exceed the editor width
 			if ( is_string( $size_name ) &&
-				strpos( $size_name, $this->p->cf['lca'].'-' ) === 0 )
+				strpos( $size_name, $this->p->cf['lca'].'-' ) === 0 ) {
 					$max_sizes = array( 0, 0 );
+			}
 			return $max_sizes;
 		}
 
 		// $attr = apply_filters( 'wp_get_attachment_image_attributes', $attr, $attachment );
 		public function add_attachment_image_attributes( $attr, $attach ) {
 			$attr['data-wp-pid'] = $attach->ID;
+			if ( ! empty( $this->p->options['p_add_nopin_media_img_tag'] ) ) {
+				$attr['nopin'] = 'nopin';
+			}
 			return $attr;
 		}
 
 		// $html = apply_filters( 'get_image_tag', $html, $id, $alt, $title, $align, $size );
-		public function add_image_tag( $html, $id, $alt, $title, $align, $size ) {
-			if ( strpos( $html, ' data-wp-pid=' ) === false )
-				$html = preg_replace( '/ *\/?>/', ' data-wp-pid="'.$id.'"$0', $html );
+		public function get_image_tag( $html, $id, $alt, $title, $align, $size ) {
+			return $this->add_header_image_tag( $html, array(
+				'data-wp-pid' => $id,
+				'nopin' => empty( $this->p->options['p_add_nopin_media_img_tag'] ) ? false : 'nopin'
+			) );
+		}
+
+		// $html = apply_filters( 'get_header_image_tag', $html, $header, $attr );
+		public function get_header_image_tag( $html, $header, $attr ) {
+			return $this->add_header_image_tag( $html, array(
+				'nopin' => empty( $this->p->options['p_add_nopin_header_img_tag'] ) ? false : 'nopin'
+			) );
+		}
+
+		private function add_header_image_tag( $html, $add_attr ) {
+			foreach ( $add_attr as $attr_name => $attr_value ) {
+				if ( $attr_value !== false && strpos( $html, ' '.$attr_name.'=' ) === false ) {
+					$html = preg_replace( '/ *\/?'.'>/', ' '.$attr_name.'="'.$attr_value.'"$0', $html );
+				}
+			}
 			return $html;
 		}
 
-		public function get_size_info( $size_name = 'thumbnail' ) {
-			if ( is_integer( $size_name ) ) 
-				return;
-			if ( is_array( $size_name ) ) 
-				return;
-
-			global $_wp_additional_image_sizes;
-
-			if ( isset( $_wp_additional_image_sizes[$size_name]['width'] ) )
-				$width = intval( $_wp_additional_image_sizes[$size_name]['width'] );
-			else $width = get_option( $size_name.'_size_w' );
-
-			if ( isset( $_wp_additional_image_sizes[$size_name]['height'] ) )
-				$height = intval( $_wp_additional_image_sizes[$size_name]['height'] );
-			else $height = get_option( $size_name.'_size_h' );
-
-			if ( isset( $_wp_additional_image_sizes[$size_name]['crop'] ) )
-				$crop = $_wp_additional_image_sizes[$size_name]['crop'];
-			else $crop = get_option( $size_name.'_crop' );
-
-			if ( ! is_array( $crop ) )
-				$crop = empty( $crop ) ? false : true;
-
-			return array( 'width' => $width, 'height' => $height, 'crop' => $crop );
-		}
-
-		public function num_remains( &$arr, $num = 0 ) {
-			$remains = 0;
-			if ( ! is_array( $arr ) ) 
-				return false;
-			if ( $num > 0 && $num >= count( $arr ) )
-				$remains = $num - count( $arr );
-			return $remains;
-		}
-
-		public function get_post_images( $num = 0, $size_name = 'thumbnail', $post_id,
-			$check_dupes = true, $md_pre = 'og' ) {
+		public function get_post_images( $num = 0, $size_name = 'thumbnail', $post_id, $check_dupes = true, $md_pre = 'og' ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
 					'post_id' => $post_id,
@@ -103,38 +102,29 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 					'md_pre' => $md_pre,
 				) );
 			}
+
 			$og_ret = array();
-			$force_regen = false;
+			$force_regen = $this->p->util->is_force_regen( $post_id, $md_pre );	// false by default
 
 			if ( ! empty( $post_id ) ) {
 
-				if ( ! empty( $this->p->options['plugin_auto_img_resize'] ) ) {
-					$force_regen_transient_id = $this->p->cf['lca'].'_post_'.$post_id.'_regen_'.$md_pre;
-					$force_regen = get_transient( $force_regen_transient_id );
-					if ( $force_regen !== false )
-						delete_transient( $force_regen_transient_id );
-				} 
-	
-				// get_og_image() is only available in the Pro version
-				if ( $this->p->check->aop() ) {
-					if ( ! $this->p->util->is_maxed( $og_ret, $num ) ) {
-						$num_remains = $this->num_remains( $og_ret, $num );
-						$og_ret = array_merge( $og_ret, $this->p->mods['util']['post']->get_og_image( $num_remains, 
-							$size_name, $post_id, $check_dupes, $force_regen, $md_pre ) );
-					}
-				}
+				// get_og_images() also provides filter hooks for additional image ids and urls
+				// unless $md_pre is 'none', get_og_images() will fallback to the 'og' custom meta
+				$og_ret = array_merge( $og_ret, $this->p->m['util']['post']->get_og_images( 1,
+					$size_name, $post_id, $check_dupes, $force_regen, $md_pre ) );
 			}
-	
-			// allow for empty post_id in order to execute featured/attached image filters for modules
+
+			// allow for empty post_id in order to execute featured / attached image filters for modules
 			if ( ! $this->p->util->is_maxed( $og_ret, $num ) ) {
-				$num_remains = $this->num_remains( $og_ret, $num );
-				$og_ret = array_merge( $og_ret, $this->get_featured( $num_remains, 
+				$num_diff = SucomUtil::count_diff( $og_ret, $num );
+				$og_ret = array_merge( $og_ret, $this->get_featured( $num_diff,
 					$size_name, $post_id, $check_dupes, $force_regen ) );
 			}
 
+			// 'ngfb_attached_images' filter is used by the buddypress module
 			if ( ! $this->p->util->is_maxed( $og_ret, $num ) ) {
-				$num_remains = $this->num_remains( $og_ret, $num );
-				$og_ret = array_merge( $og_ret, $this->get_attached_images( $num_remains, 
+				$num_diff = SucomUtil::count_diff( $og_ret, $num );
+				$og_ret = array_merge( $og_ret, $this->get_attached_images( $num_diff,
 					$size_name, $post_id, $check_dupes, $force_regen ) );
 			}
 
@@ -144,7 +134,7 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 		public function get_featured( $num = 0, $size_name = 'thumbnail', $post_id, $check_dupes = true, $force_regen = false ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
 					'post_id' => $post_id,
@@ -154,31 +144,39 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 			}
 
 			$og_ret = array();
-			$og_image = SucomUtil::meta_image_tags( 'og' );
+			$og_single_image = SucomUtil::get_mt_prop_image();
 
 			if ( ! empty( $post_id ) ) {
 				// check for an attachment page, just in case
 				if ( ( is_attachment( $post_id ) || get_post_type( $post_id ) === 'attachment' ) &&
 					wp_attachment_is_image( $post_id ) ) {
-					if ( $this->p->debug->enabled )
+
+					if ( $this->p->debug->enabled ) {
 						$this->p->debug->log( 'post_type is an attachment - using post_id '.$post_id. ' as the image ID' );
+					}
 					$pid = $post_id;
-				} elseif ( $this->p->is_avail['postthumb'] == true && has_post_thumbnail( $post_id ) )
+
+				} elseif ( $this->p->avail['*']['featured'] == true && has_post_thumbnail( $post_id ) ) {
 					$pid = get_post_thumbnail_id( $post_id );
-				else $pid = false;
+				} else {
+					$pid = false;
+				}
+
 				if ( ! empty( $pid ) ) {
 					list(
-						$og_image['og:image'],
-						$og_image['og:image:width'],
-						$og_image['og:image:height'],
-						$og_image['og:image:cropped'], 
-						$og_image['og:image:id']
+						$og_single_image['og:image'],
+						$og_single_image['og:image:width'],
+						$og_single_image['og:image:height'],
+						$og_single_image['og:image:cropped'],
+						$og_single_image['og:image:id']
 					) = $this->get_attachment_image_src( $pid, $size_name, $check_dupes, $force_regen );
-					if ( ! empty( $og_image['og:image'] ) )
-						$this->p->util->push_max( $og_ret, $og_image, $num );
+
+					if ( ! empty( $og_single_image['og:image'] ) ) {
+						$this->p->util->push_max( $og_ret, $og_single_image, $num );
+					}
 				}
 			}
-			return apply_filters( $this->p->cf['lca'].'_og_featured', $og_ret, $num, 
+			return apply_filters( $this->p->cf['lca'].'_og_featured', $og_ret, $num,
 				$size_name, $post_id, $check_dupes, $force_regen );
 		}
 
@@ -186,13 +184,15 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 			if ( ! empty( $post_id ) ) {
 				// check for an attachment page, just in case
 				if ( ( is_attachment( $post_id ) || get_post_type( $post_id ) === 'attachment' ) &&
-					wp_attachment_is_image( $post_id ) )
-						return $post_id;
-				else {
-					$images = get_children( array( 'post_parent' => $post_id, 'post_type' => 'attachment', 'post_mime_type' => 'image' ) );
+					wp_attachment_is_image( $post_id ) ) {
+					return $post_id;
+				} else {
+					$images = get_children( array( 'post_parent' => $post_id,
+						'post_type' => 'attachment', 'post_mime_type' => 'image' ) );
 					$attach = reset( $images );
-					if ( ! empty( $attach->ID ) )
+					if ( ! empty( $attach->ID ) ) {
 						return $attach->ID;
+					}
 				}
 			}
 			return false;
@@ -201,7 +201,7 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 		public function get_attachment_image( $num = 0, $size_name = 'thumbnail', $attach_id, $check_dupes = true, $force_regen = false ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array( 
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
 					'attach_id' => $attach_id,
@@ -211,22 +211,25 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 			}
 
 			$og_ret = array();
-			$og_image = SucomUtil::meta_image_tags( 'og' );
+			$og_single_image = SucomUtil::get_mt_prop_image();
 
 			if ( ! empty( $attach_id ) ) {
-				if ( wp_attachment_is_image( $attach_id ) ) {	// since wp 2.1.0 
+				if ( wp_attachment_is_image( $attach_id ) ) {	// since wp 2.1.0
 					list(
-						$og_image['og:image'],
-						$og_image['og:image:width'],
-						$og_image['og:image:height'],
-						$og_image['og:image:cropped'],
-						$og_image['og:image:id']
+						$og_single_image['og:image'],
+						$og_single_image['og:image:width'],
+						$og_single_image['og:image:height'],
+						$og_single_image['og:image:cropped'],
+						$og_single_image['og:image:id']
 					) = $this->get_attachment_image_src( $attach_id, $size_name, $check_dupes, $force_regen );
-					if ( ! empty( $og_image['og:image'] ) &&
-						$this->p->util->push_max( $og_ret, $og_image, $num ) )
-							return $og_ret;
-				} elseif ( $this->p->debug->enabled )
+
+					if ( ! empty( $og_single_image['og:image'] ) &&
+						$this->p->util->push_max( $og_ret, $og_single_image, $num ) ) {
+						return $og_ret;
+					}
+				} elseif ( $this->p->debug->enabled ) {
 					$this->p->debug->log( 'attachment id '.$attach_id.' is not an image' );
+				}
 			}
 			return $og_ret;
 		}
@@ -234,7 +237,7 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 		public function get_attached_images( $num = 0, $size_name = 'thumbnail', $post_id, $check_dupes = true, $force_regen = false ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
 					'post_id' => $post_id,
@@ -244,35 +247,47 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 			}
 
 			$og_ret = array();
-			$og_image = SucomUtil::meta_image_tags( 'og' );
+			$og_single_image = SucomUtil::get_mt_prop_image();
 
 			if ( ! empty( $post_id ) ) {
-				$images = get_children( array( 'post_parent' => $post_id, 'post_type' => 'attachment', 'post_mime_type' => 'image') );
-				if ( is_array( $images ) )
-					$attach_ids = array();
-					foreach ( $images as $attach ) {
-						if ( ! empty( $attach->ID ) )
-							$attach_ids[] = $attach->ID;
+
+				$images = get_children( array(
+					'post_parent' => $post_id,
+					'post_type' => 'attachment',
+					'post_mime_type' => 'image'
+				), OBJECT );	// OBJECT, ARRAY_A, or ARRAY_N
+
+				$attach_ids = array();
+				foreach ( $images as $attach ) {
+					if ( ! empty( $attach->ID ) ) {
+						$attach_ids[] = $attach->ID;
 					}
-					rsort( $attach_ids, SORT_NUMERIC ); 
-					$attach_ids = array_unique( apply_filters( $this->p->cf['lca'].'_attached_image_ids', $attach_ids, $post_id ) );
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'found '.count( $attach_ids ).' attached images for post_id '.$post_id );
-					foreach ( $attach_ids as $pid ) {
-						list(
-							$og_image['og:image'],
-							$og_image['og:image:width'],
-							$og_image['og:image:height'],
-							$og_image['og:image:cropped'],
-							$og_image['og:image:id']
-						) = $this->get_attachment_image_src( $pid, $size_name, $check_dupes, $force_regen );
-						if ( ! empty( $og_image['og:image'] ) &&
-							$this->p->util->push_max( $og_ret, $og_image, $num ) )
-								break;	// end foreach and apply filters
+				}
+				rsort( $attach_ids, SORT_NUMERIC );
+
+				$attach_ids = array_unique( apply_filters( $this->p->cf['lca'].'_attached_image_ids', $attach_ids, $post_id ) );
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'found '.count( $attach_ids ).' attached images for post_id '.$post_id );
+				}
+
+				foreach ( $attach_ids as $pid ) {
+					list(
+						$og_single_image['og:image'],
+						$og_single_image['og:image:width'],
+						$og_single_image['og:image:height'],
+						$og_single_image['og:image:cropped'],
+						$og_single_image['og:image:id']
+					) = $this->get_attachment_image_src( $pid, $size_name, $check_dupes, $force_regen );
+
+					if ( ! empty( $og_single_image['og:image'] ) &&
+						$this->p->util->push_max( $og_ret, $og_single_image, $num ) ) {
+						break;	// stop here and apply the 'ngfb_attached_images' filter
 					}
+				}
 			}
-			return apply_filters( $this->p->cf['lca'].'_attached_images', $og_ret, $num, 
-				$size_name, $post_id, $check_dupes );
+
+			// 'ngfb_attached_images' filter is used by the buddypress module
+			return apply_filters( $this->p->cf['lca'].'_attached_images', $og_ret, $num, $size_name, $post_id, $check_dupes, $force_regen );
 		}
 
 		/* Use these static methods in get_attachment_image_src() to set/reset information about
@@ -284,11 +299,15 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 		}
 
 		public static function get_image_src_info( $idx = false ) {
-			if ( $idx !== false ) 
-				if ( isset( self::$image_src_info[$idx] ) )
+			if ( $idx !== false ) {
+				if ( isset( self::$image_src_info[$idx] ) ) {
 					return self::$image_src_info[$idx];
-				else return null;
-			else return self::$image_src_info;
+				} else {
+					return null;
+				}
+			} else {
+				return self::$image_src_info;
+			}
 		}
 
 		// by default, return an empty image array
@@ -307,59 +326,95 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 				'force_regen' => $force_regen,
 			) );
 
-			if ( $this->p->debug->enabled )
-				$this->p->debug->args( $args );
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+				$this->p->debug->log_args( $args );
+			}
 
-			$size_info = $this->get_size_info( $size_name );
+			$lca = $this->p->cf['lca'];
+			$size_info = SucomUtil::get_size_info( $size_name );
 			$img_url = '';
-			$img_width = -1;
-			$img_height = -1;
-			$img_cropped = $size_info['crop'] === false ? 0 : 1;	// get_size_info() returns false, true, or an array
+			$img_width = NGFB_UNDEF_INT;
+			$img_height = NGFB_UNDEF_INT;
+			$img_cropped = empty( $size_info['crop'] ) ? 0 : 1;	// get_size_info() returns false, true, or an array
 
-			if ( $this->p->is_avail['media']['ngg'] === true && 
-				strpos( $pid, 'ngg-' ) === 0 ) {
+			if ( $this->p->avail['media']['ngg'] && strpos( $pid, 'ngg-' ) === 0 ) {
 
-				if ( ! empty( $this->p->mods['media']['ngg'] ) )
-					return self::reset_image_src_info( $this->p->mods['media']['ngg']->get_image_src( $pid, 
-						$size_name, $check_dupes ) );
-				else {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'ngg module is not available: image ID '.$attr_value.' ignored' ); 
-
-					if ( is_admin() )
-						$this->p->notice->err( sprintf( __( 'The NextGEN Gallery integration module provided by %1$s is required to read information for image ID %2$s.', 'nextgen-facebook' ), $this->p->cf['plugin'][$this->p->cf['lca']]['short'].' Pro', $pid ) ); 
-
-					return self::reset_image_src_info(); 
+				if ( ! empty( $this->p->m['media']['ngg'] ) ) {
+					return self::reset_image_src_info( $this->p->m['media']['ngg']->get_image_src( $pid, $size_name, $check_dupes ) );
+				} else {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'ngg module is not available: image ID '.$attr_value.' ignored' );
+					}
+					if ( $this->p->notice->is_admin_pre_notices() ) {	// skip if notices already shown
+						$this->p->notice->err( sprintf( __( 'The NextGEN Gallery integration module provided by %1$s is required to read information for image ID %2$s.', 'nextgen-facebook' ), $this->p->cf['plugin'][$lca]['short'].' Pro', $pid ) );
+					}
+					return self::reset_image_src_info();
 				}
 			} elseif ( ! wp_attachment_is_image( $pid ) ) {
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'exiting early: attachment '.$pid.' is not an image' ); 
-				return self::reset_image_src_info(); 
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: attachment '.$pid.' is not an image' );
+				}
+				return self::reset_image_src_info();
 			}
 
 			$use_full = false;
 			$img_meta = wp_get_attachment_metadata( $pid );
 
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log_arr( 'wp_get_attachment_metadata', $img_meta );
+			}
+
 			if ( isset( $img_meta['width'] ) && isset( $img_meta['height'] ) ) {
-				if ( $img_meta['width'] === $size_info['width'] && 
-					$img_meta['height'] === $size_info['height'] )
-						$use_full = true;
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'full size image '.$img_meta['file'].' dimensions '.$img_meta['width'].'x'.$img_meta['height'] );
-			} elseif ( $this->p->debug->enabled )
-				$this->p->debug->log( 'full size image '.$img_meta['file'].' dimensions are missing' );
+				if ( $img_meta['width'] === $size_info['width'] &&
+					$img_meta['height'] === $size_info['height'] ) {
+					$use_full = true;
+				}
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'full size image '.$img_meta['file'].' dimensions '.
+						$img_meta['width'].'x'.$img_meta['height'] );
+				}
+			} elseif ( $this->p->debug->enabled ) {
+				if ( isset( $img_meta['file'] ) ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'full size image '.$img_meta['file'].' dimensions missing from image metadata' );
+					}
+					if ( $this->p->notice->is_admin_pre_notices() ) {	// skip if notices already shown
+						$dismiss_key = 'full-size-image-'.$pid.'-dimensions-missing';
+						$this->p->notice->err( sprintf( __( 'Possible Media Library corruption detected &mdash; the full size image dimensions for image ID %1$s are missing from the image metadata returned by the WordPress wp_get_attachment_metadata() function.', 'nextgen-facebook' ), $pid ).' '.sprintf( 'You may consider regenerating the thumbnails of all WordPress Media Library images using one of <a href="%s">several available plugins on WordPress.org</a>.', 'https://wordpress.org/plugins/search/regenerate+thumbnails/' ), true, $dismiss_key, WEEK_IN_SECONDS );
+					}
+				} else {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'full size image file path meta for '.$pid.' missing from image metadata' );
+					}
+					if ( $this->p->notice->is_admin_pre_notices() ) {	// skip if notices already shown
+						$dismiss_key = 'full-size-image-'.$pid.'-file-path-missing';
+						$this->p->notice->err( sprintf( __( 'Possible Media Library corruption detected &mdash; the full size image file path for image ID %1$s is missing from the image metadata returned by the WordPress wp_get_attachment_metadata() function.', 'nextgen-facebook' ), $pid ).' '.sprintf( 'You may consider regenerating the thumbnails of all WordPress Media Library images using one of <a href="%s">several available plugins on WordPress.org</a>.', 'https://wordpress.org/plugins/search/regenerate+thumbnails/' ), true, $dismiss_key, WEEK_IN_SECONDS );
+					}
+				}
+			}
 
 			if ( $use_full === true ) {
-				if ( $this->p->debug->enabled )
+				if ( $this->p->debug->enabled ) {
 					$this->p->debug->log( 'requesting full size instead - image dimensions same as '.
 						$size_name.' ('.$size_info['width'].'x'.$size_info['height'].')' );
+				}
+			} elseif ( strpos( $size_name, $lca.'-' ) === 0 ) {	// only resize our own custom image sizes
 
-			} elseif ( strpos( $size_name, $this->p->cf['lca'].'-' ) === 0 ) {		// only resize our own custom image sizes
+				if ( $force_regen || ! empty( $this->p->options['plugin_create_wp_sizes'] ) ) {
 
-				if ( ! empty( $this->p->options['plugin_auto_img_resize'] ) ) {		// auto-resize images option must be enabled
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'checking image metadata for inconsistencies' );
+
+						if ( $force_regen ) {
+							$this->p->debug->log( 'force regen is true' );
+						} elseif ( empty( $img_meta['sizes'][$size_name] ) ) {
+							$this->p->debug->log( $size_name.' size missing from image metadata' );
+						}
+					}
 
 					// does the image metadata contain our image sizes?
-					if ( $force_regen === true || empty( $img_meta['sizes'][$size_name] ) ) {
+					if ( $force_regen || empty( $img_meta['sizes'][$size_name] ) ) {
 						$is_accurate_width = false;
 						$is_accurate_height = false;
 					} else {
@@ -382,160 +437,100 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 							}
 							$should_be = (int) round( $img_meta[$check] / $ratio );
 
-							// allow for a +/-1 pixel difference
+							// allow for a +/- one pixel difference
 							if ( $img_meta['sizes'][$size_name][$check] < ( $should_be - 1 ) ||
 								$img_meta['sizes'][$size_name][$check] > ( $should_be + 1 ) ) {
-									$is_accurate_width = false;
-									$is_accurate_height = false;
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( $size_name.' image metadata not accurate' );
+								}
+								$is_accurate_width = false;
+								$is_accurate_height = false;
 							}
 						}
 					}
 
 					// depending on cropping, one or both sides of the image must be accurate
 					// if not, attempt to create a resized image by calling image_make_intermediate_size()
-					if ( ( empty( $size_info['crop'] ) && ( ! $is_accurate_width && ! $is_accurate_height ) ) ||
-						( ! empty( $size_info['crop'] ) && ( ! $is_accurate_width || ! $is_accurate_height ) ) ) {
+					if ( ( ! $img_cropped && ( ! $is_accurate_width && ! $is_accurate_height ) ) ||
+						( $img_cropped && ( ! $is_accurate_width || ! $is_accurate_height ) ) ) {
 
 						if ( $this->p->debug->enabled ) {
-							if ( empty( $img_meta['sizes'][$size_name] ) )
-								$this->p->debug->log( $size_name.' size not defined in the image meta' );
-							else $this->p->debug->log( 'image metadata ('.
-								( empty( $img_meta['sizes'][$size_name]['width'] ) ? 0 : 
-									$img_meta['sizes'][$size_name]['width'] ).'x'.
-								( empty( $img_meta['sizes'][$size_name]['height'] ) ? 0 : 
-									$img_meta['sizes'][$size_name]['height'] ).') does not match '.
-								$size_name.' ('.$size_info['width'].'x'.$size_info['height'].
-									( $img_cropped === 0 ? '' : ' cropped' ).')' );
+							if ( ! $force_regen && ! empty( $img_meta['sizes'][$size_name] ) ) {
+								$this->p->debug->log( 'image metadata ('.
+									( empty( $img_meta['sizes'][$size_name]['width'] ) ? 0 :
+										$img_meta['sizes'][$size_name]['width'] ).'x'.
+									( empty( $img_meta['sizes'][$size_name]['height'] ) ? 0 :
+										$img_meta['sizes'][$size_name]['height'] ).') does not match '.
+									$size_name.' ('.$size_info['width'].'x'.$size_info['height'].
+										( $img_cropped ? ' cropped' : '' ).')' );
+							}
 						}
+
+						if ( $this->can_make_size( $img_meta, $size_info ) ) {
+							$fullsizepath = get_attached_file( $pid );
+							$resized = image_make_intermediate_size( $fullsizepath,
+								$size_info['width'], $size_info['height'], $size_info['crop'] );
 	
-						$fullsizepath = get_attached_file( $pid );
-						$resized = image_make_intermediate_size( $fullsizepath, 
-							$size_info['width'], $size_info['height'], $size_info['crop'] );
+							if ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'WordPress image_make_intermediate_size() reported '.
+									( $resized === false ? 'failure' : 'success' ) );
+							}
+	
+							if ( $resized !== false ) {
+								$img_meta['sizes'][$size_name] = $resized;
+								wp_update_attachment_metadata( $pid, $img_meta );
+							}
 
-						if ( $this->p->debug->enabled )
-							$this->p->debug->log( 'WordPress image_make_intermediate_size() reported '.
-								( $resized === false ? 'failure' : 'success' ) );
-
-						if ( $resized !== false ) {
-							$img_meta['sizes'][$size_name] = $resized;
-							wp_update_attachment_metadata( $pid, $img_meta );
+						} elseif ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'skipped image_make_intermediate_size()' );
 						}
 					}
-				} elseif ( $this->p->debug->enabled )
-					$this->p->debug->log( 'image metadata check skipped: plugin_auto_img_resize option is disabled' );
+				} elseif ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'image metadata check skipped: plugin_create_wp_sizes option is disabled' );
+				}
 			}
 
-			// some image_downsize() hooks may return only 3 elements, for use array_pad() to sanitize returned array
-			list( $img_url, $img_width, $img_height, $img_intermediate ) = apply_filters( $this->p->cf['lca'].'_image_downsize', 
+			// some image_downsize hooks may return only 3 elements, use array_pad to sanitize the returned array
+			list( $img_url, $img_width, $img_height, $img_intermediate ) = apply_filters( $lca.'_image_downsize',
 				array_pad( image_downsize( $pid, ( $use_full === true ? 'full' : $size_name ) ), 4, null ), $pid, $size_name );
-			if ( $this->p->debug->enabled )
-				$this->p->debug->log( 'image_downsize() = '.$img_url.' ('.$img_width.'x'.$img_height.')' );
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'image_downsize returned '.$img_url.' ('.$img_width.'x'.$img_height.')' );
+			}
 
 			if ( empty( $img_url ) ) {
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'exiting early: returned image_downsize() url is empty' );
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: image_downsize returned an empty url' );
+				}
 				return self::reset_image_src_info();
 			}
 
-			$accept_img_size = apply_filters( $this->p->cf['lca'].'_attached_accept_img_size', 
-				( empty( $this->p->options['plugin_ignore_small_img'] ) ? true : false ),
-					$img_url, $img_width, $img_height, $size_name, $pid );
+			// check if image exceeds hard-coded limits (dimensions, ratio, etc.)
+			$img_size_within_limits = $this->img_size_within_limits( $pid, $size_name, $img_width, $img_height );
 
-			// check for resulting image dimensions that may be too small
-			if ( empty( $accept_img_size ) ) {
+			// 'ngfb_attached_accept_img_dims' is hooked by the NgfbProCheckImgSize class / module.
+			if ( apply_filters( $lca.'_attached_accept_img_dims', $img_size_within_limits,
+				$img_url, $img_width, $img_height, $size_name, $pid ) ) {
 
-				$is_sufficient_w = $img_width >= $size_info['width'] ? true : false;
-				$is_sufficient_h = $img_height >= $size_info['height'] ? true : false;
+				if ( ! $check_dupes || $this->p->util->is_uniq_url( $img_url, $size_name ) ) {
 
-				if ( $img_width > 0 && $img_height > 0 )	// just in case
-					$ratio = $img_width >= $img_height ? 
-						$img_width / $img_height : 
-						$img_height / $img_width;
-				else $ratio = 0;
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'applying rewrite_image_url filter for '.$img_url );
+					}
 
-				$size_label = $this->p->util->get_image_size_label( $size_name );
-				$msg_id = 'wp_'.$pid.'_'.$img_width.'x'.$img_height.'_'.
-					$size_name.'_'.$size_info['width'].'x'.$size_info['height'].'_rejected';
-
-				// depending on cropping, one or both sides of the image must be large enough / sufficient
-				// return an empty array after showing an appropriate warning
-				if ( ( empty( $size_info['crop'] ) && ( ! $is_sufficient_w && ! $is_sufficient_h ) ) ||
-					( ! empty( $size_info['crop'] ) && ( ! $is_sufficient_w || ! $is_sufficient_h ) ) ) {
-
-					if ( isset( $img_meta['width'] ) && isset( $img_meta['height'] ) &&
-						$img_meta['width'] < $size_info['width'] && 
-							$img_meta['height'] < $size_info['height'] ) {
-						
-						$size_text = $img_meta['width'].'x'.$img_meta['height'].' ('.
-							__( 'full size original', 'nextgen-facebook' ).')';
-					} else $size_text = $img_width.'x'.$img_height;
-
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'exiting early: image ID '.$pid.' rejected - '.
-							$size_text.' too small for the '.$size_name.' ('.
-								$size_info['width'].'x'.$size_info['height'].
-									( $img_cropped === 0 ? '' : ' cropped' ).') image size' );
-
-					if ( is_admin() )
-						$this->p->notice->err( sprintf( __( '%1$s image ID %2$s ignored &mdash; the resulting image of %3$s is too small for the %4$s image size.', 'nextgen-facebook' ),
-							__( 'Media Library', 'nextgen-facebook' ),
-							$pid,
-							$size_text,
-							'<b>'.$size_label.'</b> ('.$size_info['width'].'x'.$size_info['height'].
-								( $img_cropped === 0 ? '' : ' <i>'.__( 'cropped', 'nextgen-facebook' ).'</i>' ).')'
-						).' '.$this->p->msgs->get( 'notice-image-rejected', array( 'size_label' => $size_label ) ), false, true, $msg_id, true );
-					return self::reset_image_src_info();
-
-				// if this is an open graph image, make sure it is larger than 200x200
-				} elseif ( $size_name == $this->p->cf['lca'].'-opengraph' &&
-					( $img_width < $this->p->cf['head']['min_img_dim'] ||
-					$img_height < $this->p->cf['head']['min_img_dim'] ) ) {
-
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'exiting early: image ID '.$pid.' rejected - '.
-							$img_width.'x'.$img_height.' smaller than hard-coded minimum '.
-								$this->p->cf['head']['min_img_dim'].'x'.$this->p->cf['head']['min_img_dim'] );
-
-					if ( is_admin() )
-						$this->p->notice->err( sprintf( __( '%1$s image ID %2$s ignored &mdash; the resulting image of %3$s is smaller than the minimum %4$s allowed by the Facebook / Open Graph standard.', 'nextgen-facebook' ), 
-							__( 'Media Library', 'nextgen-facebook' ),
-							$pid,
-							$img_width.'x'.$img_height,
-							$this->p->cf['head']['min_img_dim'].'x'.$this->p->cf['head']['min_img_dim']
-						).' '.$this->p->msgs->get( 'notice-image-rejected', array( 'size_label' => $size_label ) ), false, true, $msg_id, true );
-					return self::reset_image_src_info();
-
-				} elseif ( $ratio >= $this->p->cf['head']['max_img_ratio'] ) {
-
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'exiting early: image ID '.$pid.' rejected - '.
-							$img_width.'x'.$img_height.' aspect ratio is equal to/or greater than '.
-								$this->p->cf['head']['max_img_ratio'].':1' );
-
-					if ( is_admin() )
-						$this->p->notice->err( sprintf( __( '%1$s image ID %2$s ignored &mdash; the resulting image of %3$s has an aspect ratio equal to/or greater than %4$d:1.', 'nextgen-facebook' ),
-							__( 'Media Library', 'nextgen-facebook' ),
-							$pid,
-							$img_width.'x'.$img_height,
-							$this->p->cf['head']['max_img_ratio']
-						).' '.$this->p->msgs->get( 'notice-image-rejected', array( 'size_label' => $size_label ) ), false, true, $msg_id, true );
-					return self::reset_image_src_info();
-
-				} elseif ( $this->p->debug->enabled )
-					$this->p->debug->log( 'returned image dimensions ('.$img_width.'x'.$img_height.') are sufficient' );
+					return self::reset_image_src_info( array( apply_filters( $lca.'_rewrite_image_url',
+						$this->p->util->fix_relative_url( $img_url ) ),	// just in case
+							$img_width, $img_height, $img_cropped, $pid ) );
+				}
 			}
-
-			if ( $check_dupes == false || $this->p->util->is_uniq_url( $img_url, $size_name ) )
-				return self::reset_image_src_info( array( apply_filters( $this->p->cf['lca'].'_rewrite_url', $img_url ),
-					$img_width, $img_height, $img_cropped, $pid ) );
 
 			return self::reset_image_src_info();
 		}
 
-		public function get_default_image( $num = 1, $size_name = 'thumbnail', $check_dupes = true, $force_regen = false ) {
+		public function get_default_images( $num = 1, $size_name = 'thumbnail', $check_dupes = true, $force_regen = false ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
 					'check_dupes' => $check_dupes,
@@ -544,99 +539,131 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 			}
 
 			$og_ret = array();
-			$og_image = SucomUtil::meta_image_tags( 'og' );
+			$og_single_image = SucomUtil::get_mt_prop_image();
 
-			foreach ( array( 'id', 'id_pre', 'url', 'url:width', 'url:height' ) as $key )
+			foreach ( array( 'id', 'id_pre', 'url', 'url:width', 'url:height' ) as $key ) {
 				$img[$key] = empty( $this->p->options['og_def_img_'.$key] ) ?
 					'' : $this->p->options['og_def_img_'.$key];
+			}
 
 			if ( empty( $img['id'] ) && empty( $img['url'] ) ) {
-				if ( $this->p->debug->enabled )
+				if ( $this->p->debug->enabled ) {
 					$this->p->debug->log( 'exiting early: no default image defined' );
+				}
 				return $og_ret;
 			}
 
 			if ( ! empty( $img['id'] ) ) {
+
 				$img['id'] = $img['id_pre'] === 'ngg' ?
 					'ngg-'.$img['id'] : $img['id'];
 
-				if ( $this->p->debug->enabled )
+				if ( $this->p->debug->enabled ) {
 					$this->p->debug->log( 'using default image pid: '.$img['id'] );
+				}
 
 				list(
-					$og_image['og:image'],
-					$og_image['og:image:width'],
-					$og_image['og:image:height'],
-					$og_image['og:image:cropped'],
-					$og_image['og:image:id']
+					$og_single_image['og:image'],
+					$og_single_image['og:image:width'],
+					$og_single_image['og:image:height'],
+					$og_single_image['og:image:cropped'],
+					$og_single_image['og:image:id']
 				) = $this->get_attachment_image_src( $img['id'], $size_name, $check_dupes, $force_regen );
 			}
 
-			if ( empty( $og_image['og:image'] ) && 
-				! empty( $img['url'] ) ) {
+			if ( empty( $og_single_image['og:image'] ) && ! empty( $img['url'] ) ) {
 
-				if ( $this->p->debug->enabled )
+				if ( $this->p->debug->enabled ) {
 					$this->p->debug->log( 'using default image url: '.$img['url'] );
+				}
 
-				$og_image = array(
+				$og_single_image = array(
 					'og:image' => $img['url'],
 					'og:image:width' => $img['url:width'],
 					'og:image:height' => $img['url:height'],
 				);
 			}
 
-			if ( ! empty( $og_image['og:image'] ) && 
-				$this->p->util->push_max( $og_ret, $og_image, $num ) )
-					return $og_ret;
+			if ( ! empty( $og_single_image['og:image'] ) &&
+				$this->p->util->push_max( $og_ret, $og_single_image, $num ) ) {
+				return $og_ret;
+			}
 
 			return $og_ret;
 		}
 
-		public function get_content_images( $num = 0, $size_name = 'thumbnail', $post_id = 0, $check_dupes = true, $content = '' ) {
+		public function get_content_images( $num = 0, $size_name = 'thumbnail', $mod = true, $check_dupes = true, $force_regen = false, $content = '' ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
-					'post_id' => $post_id,
+					'mod' => $mod,
 					'check_dupes' => $check_dupes,
-					'content' => strlen( $content ).' chars',
+					'content strlen' => strlen( $content ),
 				) );
 			}
-			$og_ret = array();
 
-			// allow custom content to be passed as argument
-			if ( empty( $content ) ) {
-				$content_provided = false;
-				$content = $this->p->webpage->get_content( $post_id, false );	// use_post = false
-			} else $content_provided = true;
-
-			if ( empty( $content ) ) { 
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'exiting early: empty post content' ); 
-				return $og_ret; 
+			// $mod is preferred but not required
+			// $mod = true | false | post_id | $mod array
+			if ( ! is_array( $mod ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'optional call to get_page_mod()' );
+				}
+				$mod = $this->p->util->get_page_mod( $mod );
 			}
 
-			$og_image = SucomUtil::meta_image_tags( 'og' );
-			$size_info = $this->get_size_info( $size_name );
-			$img_preg = $this->default_img_preg;
+			$og_ret = array();
+
+			// allow custom content to be passed as an argument in $content
+			// allow empty post IDs to get additional content from filter hooks
+			if ( empty( $content ) ) {
+				$content = $this->p->page->get_the_content( $mod );
+				$content_passed = false;
+			} else {
+				$content_passed = true;
+			}
+
+			if ( empty( $content ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: empty post content' );
+				}
+				return $og_ret;
+			}
+
+			$og_single_image = SucomUtil::get_mt_prop_image();
+			$size_info = SucomUtil::get_size_info( $size_name );
+			$img_preg = $this->def_img_preg;
 
 			// allow the html_tag and pid_attr regex to be modified
 			foreach( array( 'html_tag', 'pid_attr' ) as $type ) {
 				$filter_name = $this->p->cf['lca'].'_content_image_preg_'.$type;
 				if ( has_filter( $filter_name ) ) {
-					$img_preg[$type] = apply_filters( $filter_name, $this->default_img_preg[$type] );
-					if ( $this->p->debug->enabled )
+					$img_preg[$type] = apply_filters( $filter_name, $this->def_img_preg[$type] );
+					if ( $this->p->debug->enabled ) {
 						$this->p->debug->log( 'filtered image preg '.$type.' = \''.$img_preg[$type].'\'' );
+					}
 				}
 			}
 
 			// img attributes in order of preference
 			if ( preg_match_all( '/<(('.$img_preg['html_tag'].')[^>]*? ('.$img_preg['pid_attr'].')=[\'"]([0-9]+)[\'"]|'.
-				'(img)[^>]*? (data-share-src|src)=[\'"]([^\'"]+)[\'"])[^>]*>/s', $content, $all_matches, PREG_SET_ORDER ) ) {
+				'(img)[^>]*? (data-share-src|data-lazy-src|data-src|src)=[\'"]([^\'"]+)[\'"])[^>]*>/s',
+					$content, $all_matches, PREG_SET_ORDER ) ) {
 
-				if ( $this->p->debug->enabled )
+				$content_img_max = SucomUtil::get_const( 'NGFB_CONTENT_IMAGES_MAX_LIMIT', 5 );
+
+				if ( count( $all_matches ) > $content_img_max ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'limiting matches returned from '.
+							count( $all_matches ).' to '.$content_img_max );
+					}
+					$all_matches = array_splice( $all_matches, 0, $content_img_max );
+				}
+
+				if ( $this->p->debug->enabled ) {
 					$this->p->debug->log( count( $all_matches ).' x matching <'.$img_preg['html_tag'].'/> html tag(s) found' );
+				}
 
 				foreach ( $all_matches as $img_num => $img_arr ) {
 
@@ -648,25 +675,30 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 						$attr_value = $img_arr[4];	// id
 					} else {
 						$tag_name = $img_arr[5];	// img
-						$attr_name = $img_arr[6];	// data-share-src|src
+						$attr_name = $img_arr[6];	// data-share-src|data-lazy-src|data-src|src
 						$attr_value = $img_arr[7];	// url
 					}
 
-					if ( $this->p->debug->enabled )
+					if ( $this->p->debug->enabled ) {
 						$this->p->debug->log( 'match '.$img_num.': '.$tag_name.' '.$attr_name.'="'.$attr_value.'"' );
+					}
 
 					switch ( $attr_name ) {
 
 						// wordpress media library image id
 						case 'data-wp-pid':
 
+							if ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'WP image attribute id found: '.$attr_value );
+							}
+
 							list(
-								$og_image['og:image'],
-								$og_image['og:image:width'],
-								$og_image['og:image:height'],
-								$og_image['og:image:cropped'],
-								$og_image['og:image:id']
-							) = $this->get_attachment_image_src( $attr_value, $size_name, false );
+								$og_single_image['og:image'],
+								$og_single_image['og:image:width'],
+								$og_single_image['og:image:height'],
+								$og_single_image['og:image:cropped'],
+								$og_single_image['og:image:id']
+							) = $this->get_attachment_image_src( $attr_value, $size_name, false, $force_regen );
 
 							break;
 
@@ -677,354 +709,665 @@ if ( ! class_exists( 'NgfbMedia' ) ) {
 							$filter_name = $this->p->cf['lca'].'_get_content_'.
 								$tag_name.'_'.( preg_replace( '/-/', '_', $attr_name ) );
 
+							if ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'applying filter '.$filter_name );
+							}
+
 							list(
-								$og_image['og:image'],
-								$og_image['og:image:width'],
-								$og_image['og:image:height'],
-								$og_image['og:image:cropped'],
-								$og_image['og:image:id']
-							) = apply_filters( $filter_name, array( null, null, null, null, null ),
-								$attr_value, $size_name, false );
+								$og_single_image['og:image'],
+								$og_single_image['og:image:width'],
+								$og_single_image['og:image:height'],
+								$og_single_image['og:image:cropped'],
+								$og_single_image['og:image:id']
+							) = apply_filters( $filter_name, array( null, null, null, null, null ), $attr_value, $size_name, false );
 
 							break;
 
+						// data-share-src|data-lazy-src|data-src|src
 						default:
-							// prevent duplicates by silently ignoring ngg images (already processed by the ngg module)
-							if ( $this->p->is_avail['media']['ngg'] === true && 
-								! empty( $this->p->mods['media']['ngg'] ) &&
-									( preg_match( '/ class=[\'"]ngg[_-]/', $tag_value ) || 
-										preg_match( '/^('.$img_preg['ngg_src'].')$/', $attr_value ) ) )
-											break;	// stop here
-	
-							// recognize gravatar images in the content
-							if ( preg_match( '/^https?:\/\/([^\.]+\.)?gravatar\.com\/avatar\/[a-zA-Z0-9]+/',
-								$attr_value, $match ) ) {
 
-								$og_image['og:image'] = $match[0].'?s='.$size_info['width'].'&d=404&r=G';
-								$og_image['og:image:width'] = $size_info['width'];
-								$og_image['og:image:height'] = $size_info['width'];	// square image
+							// prevent duplicates by silently ignoring ngg images (already processed by the ngg module)
+							if ( $this->p->avail['media']['ngg'] === true &&
+								! empty( $this->p->m['media']['ngg'] ) &&
+									( preg_match( '/ class=[\'"]ngg[_-]/', $tag_value ) ||
+										preg_match( '/^('.$img_preg['ngg_src'].')$/', $attr_value ) ) ) {
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( 'silently ignoring ngg image for '.$attr_name );
+								}
+								break;	// stop here
+							}
+
+							// recognize gravatar images in the content
+							if ( preg_match( '/^(https?:)?(\/\/([^\.]+\.)?gravatar\.com\/avatar\/[a-zA-Z0-9]+)/', $attr_value, $match ) ) {
+
+								$og_single_image['og:image'] = SucomUtil::get_prot().':'.$match[2].'?s='.$size_info['width'].'&d=404&r=G';
+								$og_single_image['og:image:width'] = $size_info['width'];
+								$og_single_image['og:image:height'] = $size_info['width'];	// square image
+
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( 'gravatar image found: '.$og_single_image['og:image'] );
+								}
+
 								break;	// stop here
 							}
 
 							// check for image ID in class for old content w/o the data-wp-pid attribute
-							if ( preg_match( '/class="[^"]+ wp-image-([0-9]+)/',
-								$tag_value, $match ) ) {
+							if ( preg_match( '/class="[^"]+ wp-image-([0-9]+)/', $tag_value, $match ) ) {
 								list(
-									$og_image['og:image'],
-									$og_image['og:image:width'],
-									$og_image['og:image:height'],
-									$og_image['og:image:cropped'],
-									$og_image['og:image:id']
-								) = $this->get_attachment_image_src( $match[1], $size_name, false );
+									$og_single_image['og:image'],
+									$og_single_image['og:image:width'],
+									$og_single_image['og:image:height'],
+									$og_single_image['og:image:cropped'],
+									$og_single_image['og:image:id']
+								) = $this->get_attachment_image_src( $match[1], $size_name, false, $force_regen );
 								break;	// stop here
 							} else {
-								$og_image = array(
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( 'using attribute value for og:image = '.$attr_value.
+										' ('.NGFB_UNDEF_INT.'x'.NGFB_UNDEF_INT.')' );
+								}
+								$og_single_image = array(
 									'og:image' => $attr_value,
-									'og:image:width' => -1,
-									'og:image:height' => -1,
+									'og:image:width' => NGFB_UNDEF_INT,
+									'og:image:height' => NGFB_UNDEF_INT,
 								);
 							}
 
-							// try and get the width and height from the image attributes
-							if ( ! empty( $og_image['og:image'] ) ) {
-								if ( preg_match( '/ width=[\'"]?([0-9]+)[\'"]?/i',
-									$tag_value, $match ) ) 
-										$og_image['og:image:width'] = $match[1];
-								if ( preg_match( '/ height=[\'"]?([0-9]+)[\'"]?/i',
-									$tag_value, $match ) ) 
-										$og_image['og:image:height'] = $match[1];
+							if ( empty( $og_single_image['og:image'] ) ) {
+								$this->p->debug->log( 'single image og:image value is empty' );
+								break;	// stop here
 							}
 
-							$is_sufficient_w = $og_image['og:image:width'] >= $size_info['width'] ? true : false;
-							$is_sufficient_h = $og_image['og:image:height'] >= $size_info['height'] ? true : false;
+							$check_size_limits = true;
+							$img_size_within_limits = true;
 
-							$accept_img_size = apply_filters( $this->p->cf['lca'].'_content_accept_img_size', 
-								( empty( $this->p->options['plugin_ignore_small_img'] ) ? true : false ),
-								$og_image['og:image'], 
-								$og_image['og:image:width'], 
-								$og_image['og:image:height'], 
-								$size_name, $post_id );
+							// get the actual width and height of the image using http / https
+							if ( empty( $og_single_image['og:image:width'] ) || $og_single_image['og:image:width'] < 0 ||
+								empty( $og_single_image['og:image:height'] ) || $og_single_image['og:image:height'] < 0 ) {
 
-							// make sure the image width and height are large enough
-							if ( ( $attr_name == 'src' && $accept_img_size ) ||
-								( $attr_name == 'src' && $size_info['crop'] && 
-									( $is_sufficient_w && $is_sufficient_h ) ) ||
-								( $attr_name == 'src' && ! $size_info['crop'] && 
-									( $is_sufficient_w || $is_sufficient_h ) ) ||
-								$attr_name == 'data-share-src' ) {
+								$this->p->util->add_image_url_size( 'og:image', $og_single_image );
 
-								// data-share-src attribute used and/or image size is acceptable
-								// check for relative urls, just in case
-								$og_image['og:image'] = $this->p->util->fix_relative_url( $og_image['og:image'] );
-
-							} else {
-								if ( $this->p->debug->enabled )
-									$this->p->debug->log( 'content image rejected: '.
-										'width / height missing or too small for '.$size_name );
-								if ( is_admin() ) {
-									$short = $this->p->cf['plugin'][$this->p->cf['lca']]['short'];
-									$size_label = $this->p->util->get_image_size_label( $size_name );
-									$msg_id = 'content_'.$og_image['og:image'].'_'.$size_name.'_rejected';
-
-									if ( ! $content_provided )
-										$data_wp_pid_msg = ' '.sprintf( __( '%1$s includes an additional \'data-wp-pid\' attribute for images from the Media Library to supplement the width / height information &mdash; if this image was selected from the Media Library before %2$s was first activated, try removing and adding the image back to your content.', 'nextgen-facebook' ), $short, $short );
-									else $data_wp_pid_msg = '';
-
-									$this->p->notice->err( sprintf( __( 'Content image %1$s ignored &mdash; the image width / height attributes are missing or too small for the %2$s image size.', 'nextgen-facebook' ), $og_image['og:image'], '<b>'.$size_label.'</b> ('.$size_name.')' ).$data_wp_pid_msg, false, true, $msg_id, true );
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( 'returned / fetched image url size: '.
+										$og_single_image['og:image:width'].'x'.$og_single_image['og:image:height'] );
 								}
-								$og_image = array();
+
+								// no use checking / retrieving the image size twice
+								if ( $og_single_image['og:image:width'] === NGFB_UNDEF_INT &&
+									$og_single_image['og:image:height'] === NGFB_UNDEF_INT ) {
+									$check_size_limits = false;
+									$img_size_within_limits = false;
+								}
+
+							} elseif ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'image width / height values: '.
+									$og_single_image['og:image:width'].'x'.$og_single_image['og:image:height'] );
 							}
+
+							if ( $check_size_limits ) {
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( 'checking image size limits for '.$og_single_image['og:image'].
+										' ('.$og_single_image['og:image:width'].'x'.$og_single_image['og:image:height'].')' );
+								}
+								// check if image exceeds hard-coded limits (dimensions, ratio, etc.)
+								$img_size_within_limits = $this->img_size_within_limits( $og_single_image['og:image'],
+									$size_name, $og_single_image['og:image:width'], $og_single_image['og:image:height'],
+										__( 'Content', 'nextgen-facebook' ) );
+
+							} elseif ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'skipped image size limits for '.$og_single_image['og:image'].
+									' ('.$og_single_image['og:image:width'].'x'.$og_single_image['og:image:height'].')' );
+							}
+
+							// 'ngfb_content_accept_img_dims' is hooked by the NgfbProCheckImgSize class / module.
+							if ( ! apply_filters( $this->p->cf['lca'].'_content_accept_img_dims',
+								$img_size_within_limits, $og_single_image, $size_name, $attr_name, $content_passed ) ) {
+								$og_single_image = array();
+							}
+
 							break;
 					}
-					if ( ! empty( $og_image['og:image'] ) && ( $check_dupes === false || 
-						$this->p->util->is_uniq_url( $og_image['og:image'], $size_name ) ) )
-							if ( $this->p->util->push_max( $og_ret, $og_image, $num ) )
+
+					if ( ! empty( $og_single_image['og:image'] ) ) {
+
+						$og_single_image['og:image'] = apply_filters( $this->p->cf['lca'].'_rewrite_image_url',
+							$this->p->util->fix_relative_url( $og_single_image['og:image'] ) );
+
+						if ( $check_dupes === false || $this->p->util->is_uniq_url( $og_single_image['og:image'], $size_name ) ) {
+							if ( $this->p->util->push_max( $og_ret, $og_single_image, $num ) ) {
 								return $og_ret;
+							}
+						}
+					}
 				}
 				return $og_ret;
 			}
-			if ( $this->p->debug->enabled )
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->log( 'no matching <'.$img_preg['html_tag'].'/> html tag(s) found' );
-			return $og_ret;
-		}
-
-		// called by TwitterCard class to build the Gallery Card
-		public function get_gallery_images( $num = 0, $size_name = 'large', $post_id, $check_dupes = false, $get = 'gallery' ) {
-
-			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
-					'num' => $num,
-					'size_name' => $size_name,
-					'post_id' => $post_id,
-					'check_dupes' => $check_dupes,
-					'get' => $get,
-				) );
-			}
-
-			$og_ret = array();
-
-			if ( $get == 'gallery' ) {
-
-				if ( ( $obj = $this->p->util->get_post_object( $post_id ) ) === false || empty( $obj->post_type ) ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'exiting early: object without post type' );
-					return $og_ret; 
-				} elseif ( empty( $obj->post_content ) ) { 
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'exiting early: post without content' ); 
-					return $og_ret;
-				}
-
-				if ( preg_match( '/\[(gallery)[^\]]*\]/im', $obj->post_content, $match ) ) {
-
-					$shortcode_type = strtolower( $match[1] );
-
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( '['.$shortcode_type.'] shortcode found' );
-
-					switch ( $shortcode_type ) {
-						case 'gallery' :
-							$content = do_shortcode( $match[0] );
-
-							// prevent loops, just in case
-							$content = preg_replace( '/\['.$shortcode_type.'[^\]]*\]/', '', $content );
-
-							// provide content to the method and extract its images
-							// $post_id argument is 0 since we're passing the content
-							$og_ret = array_merge( $og_ret, $this->p->media->get_content_images( $num, 
-								$size_name, 0, $check_dupes, $content ) );
-
-							if ( ! empty( $og_ret ) ) 
-								return $og_ret;		// return immediately and ignore any other type of image
-							break;
-					}
-
-				} elseif ( $this->p->debug->enabled )
-					$this->p->debug->log( '[gallery] shortcode(s) not found' );
-			}
-
-			// check for ngg gallery
-			if ( $this->p->is_avail['media']['ngg'] === true && 
-				! empty( $this->p->mods['media']['ngg'] ) ) {
-
-				$og_ret = $this->p->mods['media']['ngg']->get_gallery_images( $num , 
-					$size_name, $post_id, $check_dupes, $get );
-
-				if ( $this->p->util->is_maxed( $og_ret, $num ) )
-					return $og_ret;
-			}
-
-			$this->p->util->slice_max( $og_ret, $num );
-
-			return $og_ret;
-		}
-
-		public function get_default_video( $num = 0, $check_dupes = true ) {
-
-			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
-					'num' => $num,
-					'check_dupes' => $check_dupes,
-				) );
-			}
-			$og_ret = array();
-
-			$url = empty( $this->p->options['og_def_vid_url'] ) ?
-				'' : $this->p->options['og_def_vid_url'];
-
-			if ( ! empty( $url ) && ( $check_dupes == false || 
-				$this->p->util->is_uniq_url( $url ) ) ) {
-
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'using default video url = '.$url );
-
-				// fallback to video url if necessary
-				$og_video = $this->get_video_info( $url, 0, 0, $check_dupes, true );
-				if ( ! empty( $og_video ) && 
-					$this->p->util->push_max( $og_ret, $og_video, $num ) ) 
-						return $og_ret;
 			}
 			return $og_ret;
 		}
 
-		/**
-		 * Purpose: Check the content for generic <iframe|embed/> html tags. Apply ngfb_content_videos filter for more specialized checks.
-		 */
-		public function get_content_videos( $num = 0, $post_id = 0, $check_dupes = true, $content = '' ) {
+		public function get_opts_image( $opts, $size_name, $check_dupes = true, $force_regen = false, $opt_pre = 'og', $mt_pre = 'og' ) {
+
+			foreach ( array( 'id', 'id_pre', 'url', 'url:width', 'url:height' ) as $key ) {
+				$img[$key] = empty( $opts[$opt_pre.'_img_'.$key] ) ?
+					'' : $opts[$opt_pre.'_img_'.$key];
+			}
+
+			$mt_image = array();
+
+			if ( ! empty( $img['id'] ) ) {
+
+				$img['id'] = $img['id_pre'] === 'ngg' ?
+					'ngg-'.$img['id'] : $img['id'];
+
+				list( 
+					$mt_image[$mt_pre.':image'],
+					$mt_image[$mt_pre.':image:width'],
+					$mt_image[$mt_pre.':image:height'],
+					$mt_image[$mt_pre.':image:cropped'],
+					$mt_image[$mt_pre.':image:id']
+				) = $this->get_attachment_image_src( $img['id'], $size_name, $check_dupes, $force_regen );
+			}
+
+			if ( empty( $mt_image[$mt_pre.':image'] ) && ! empty( $img['url'] ) ) {
+				$mt_image = array(
+					$mt_pre.':image' => $img['url'],
+					$mt_pre.':image:width' => ( $img['url:width'] > 0 ? $img['url:width'] : NGFB_UNDEF_INT ),
+					$mt_pre.':image:height' => ( $img['url:height'] > 0 ? $img['url:height'] : NGFB_UNDEF_INT ),
+				);
+			}
+
+			return $mt_image;
+		}
+
+		public function get_content_videos( $num = 0, $mod = true, $check_dupes = true, $content = '' ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array(
+				$this->p->debug->log_args( array(
 					'num' => $num,
-					'post_id' => $post_id,
+					'mod' => $mod,
 					'check_dupes' => $check_dupes,
 					'content' => strlen( $content ).' chars',
 				) );
 			}
+
+			// $mod = true | false | post_id | $mod array
+			if ( ! is_array( $mod ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'optional call to get_page_mod()' );
+				}
+				$mod = $this->p->util->get_page_mod( $mod );
+			}
+
 			$og_ret = array();
 
-			// allow custom content to be passed as argument
-			if ( empty( $content ) && $post_id > 0 )
-				$content = $this->p->webpage->get_content( $post_id, false );	// use_post = false
+			// allow custom content to be passed as an argument in $content
+			// allow empty post IDs to get additional content from filter hooks
+			if ( empty( $content ) ) {
+				$content = $this->p->page->get_the_content( $mod );
+				$content_passed = false;
+			} else {
+				$content_passed = true;
+			}
 
-			if ( empty( $content ) ) { 
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'exiting early: empty post content' ); 
-				return $og_ret; 
+			if ( empty( $content ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: empty post content' );
+				}
+				return $og_ret;
 			}
 
 			// detect standard iframe/embed tags - use the ngfb_content_videos filter for additional html5/javascript methods
-			// the src url must contain '/embed|embed_code|swf|video|v/' in to be recognized as an embedded video url
-			if ( preg_match_all( '/<(iframe|embed)[^<>]*? src=[\'"]([^\'"<>]+\/(embed|embed_code|swf|video|v)\/[^\'"<>]+)[\'"][^<>]*>/i',
-				$content, $match_all, PREG_SET_ORDER ) ) {
+			if ( preg_match_all( '/<(iframe|embed)[^<>]*? (data-share-src|data-lazy-src|data-src|src)=[\'"]'.
+				'([^\'"<>]+\/(embed\/|embed_code\/|player\/|swf\/|v\/|video\/|video\.php\?)[^\'"<>]+)[\'"][^<>]*>/i',
+					$content, $all_matches, PREG_SET_ORDER ) ) {
 
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( count( $match_all ).' x video <iframe|embed/> html tag(s) found' );
+				$content_vid_max = SucomUtil::get_const( 'NGFB_CONTENT_VIDEOS_MAX_LIMIT', 5 );
 
-				foreach ( $match_all as $media ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( '<'.$media[1].'/> html tag found = '.$media[2] );
-					$embed_url = $media[2];
-					if ( ! empty( $embed_url ) && ( $check_dupes == false || 
-						$this->p->util->is_uniq_url( $embed_url ) ) ) {
+				if ( count( $all_matches ) > $content_vid_max ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'limiting matches returned from '.
+							count( $all_matches ).' to '.$content_vid_max );
+					}
+					$all_matches = array_splice( $all_matches, 0, $content_vid_max );
+				}
 
-						$embed_width = preg_match( '/ width=[\'"]?([0-9]+)[\'"]?/i', $media[0], $match) ? $match[1] : -1;
-						$embed_height = preg_match( '/ height=[\'"]?([0-9]+)[\'"]?/i', $media[0], $match) ? $match[1] : -1;
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( count( $all_matches ).' x video <iframe|embed/> html tag(s) found' );
+				}
 
+				foreach ( $all_matches as $media ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( '<'.$media[1].'/> html tag found '.$media[2].' = '.$media[3] );
+					}
+					$embed_url = $media[3];
+					if ( ! empty( $embed_url ) && ( $check_dupes == false || $this->p->util->is_uniq_url( $embed_url, 'video' ) ) ) {
+
+						$embed_width = preg_match( '/ width=[\'"]?([0-9]+)[\'"]?/i', $media[0], $match) ? $match[1] : NGFB_UNDEF_INT;
+						$embed_height = preg_match( '/ height=[\'"]?([0-9]+)[\'"]?/i', $media[0], $match) ? $match[1] : NGFB_UNDEF_INT;
 						$og_video = $this->get_video_info( $embed_url, $embed_width, $embed_height, $check_dupes );
-						if ( ! empty( $og_video ) && 
-							$this->p->util->push_max( $og_ret, $og_video, $num ) ) 
-								return $og_ret;
+
+						if ( ! empty( $og_video ) && $this->p->util->push_max( $og_ret, $og_video, $num ) ) {
+							return $og_ret;
+						}
 					}
 				}
-			} elseif ( $this->p->debug->enabled )
+			} elseif ( $this->p->debug->enabled ) {
 				$this->p->debug->log( 'no <iframe|embed/> html tag(s) found' );
+			}
 
 			// additional filters / Pro modules may detect other embedded video markup
 			$filter_name = $this->p->cf['lca'].'_content_videos';
+
 			if ( has_filter( $filter_name ) ) {
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'applying filter '.$filter_name ); 
+
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'applying filter '.$filter_name );
+				}
+
 				// should return an array of arrays
-				if ( ( $match_all = apply_filters( $filter_name, false, $content ) ) !== false ) {
-					if ( is_array( $match_all ) ) {
-						if ( $this->p->debug->enabled )
-							$this->p->debug->log( count( $match_all ).' x videos returned by '.$filter_name.' filter' );
-						foreach ( $match_all as $media ) {
-							if ( ! empty( $media[0] ) && ( $check_dupes == false || 
-								$this->p->util->is_uniq_url( $media[0] ) ) ) {
+				if ( ( $all_matches = apply_filters( $filter_name, false, $content ) ) !== false ) {
+
+					if ( is_array( $all_matches ) ) {
+
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( count( $all_matches ).' x videos returned by '.$filter_name.' filter' );
+						}
+
+						foreach ( $all_matches as $media ) {
+
+							if ( ! empty( $media[0] ) && ( $check_dupes == false || $this->p->util->is_uniq_url( $media[0], 'video' ) ) ) {
 
 								$og_video = $this->get_video_info( $media[0], $media[1], $media[2], $check_dupes );
-								if ( ! empty( $og_video ) && 
-									$this->p->util->push_max( $og_ret, $og_video, $num ) ) 
-										return $og_ret;
+
+								if ( ! empty( $og_video ) && $this->p->util->push_max( $og_ret, $og_video, $num ) ) {
+									return $og_ret;
+								}
 							}
 						}
-					} elseif ( $this->p->debug->enabled )
-						$this->p->debug->log( $filter_name.' filter did not return false or an array' ); 
+
+					} elseif ( $this->p->debug->enabled ) {
+						$this->p->debug->log( $filter_name.' filter did not return false or an array' );
+					}
 				}
 			}
+
 			return $og_ret;
 		}
 
-		public function get_video_info( $url, $embed_width = 0, $embed_height = 0, $check_dupes = true, $fallback = false ) {
-			if ( empty( $url ) ) 
+		public function get_video_info( $embed_url, $embed_width, $embed_height, $check_dupes, $fallback = false ) {
+
+			if ( empty( $embed_url ) ) {
 				return array();
+			}
 
 			$filter_name = $this->p->cf['lca'].'_video_info';
-			if ( ! has_filter( $filter_name ) ) {
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'exiting early: no filter(s) for '.$filter_name ); 
-				return array();
-			}
 
-			$og_video = array(
-				'og:video:url' => '',
-				'og:video:embed_url' => '',
-				'og:video:secure_url' => '',
-				'og:video:type' => 'application/x-shockwave-flash',	// default type, after the url
-				'og:video:width' => $embed_width,			// default width
-				'og:video:height' => $embed_height,			// default height
-				'og:image' => '',
-				'og:image:width' => -1,
-				'og:image:height' => -1,
+			$og_video = array_merge(
+				SucomUtil::get_mt_prop_video(),			// includes og:image meta tags for the preview image
+				array(
+					'og:video:width' => $embed_width,	// default width
+					'og:video:height' => $embed_height,	// default height
+				)
 			);
 
-			$og_video = apply_filters( $filter_name, $og_video, $url, $embed_width, $embed_height );
+			$og_video = apply_filters( $filter_name, $og_video, $embed_url, $embed_width, $embed_height );
 
-			// cleanup any extra video meta tags - just in case
-			if ( empty( $og_video['og:video:url'] ) || ( $check_dupes &&
-				! $this->p->util->is_uniq_url( $og_video['og:video:url'] ) ) )
-					unset ( 
-						$og_video['og:video:url'],
-						$og_video['og:video:embed_url'],
-						$og_video['og:video:secure_url'],
-						$og_video['og:video:type'],
-						$og_video['og:video:width'],
-						$og_video['og:video:height']
-					);
-
-			// cleanup any extra image meta tags
-			if ( empty( $og_video['og:image'] ) || 
-				( $check_dupes && ! $this->p->util->is_uniq_url( $og_video['og:image'] ) ) )
-					unset ( 
-						$og_video['og:image'],
-						$og_video['og:image:secure_url'],
-						$og_video['og:image:width'],
-						$og_video['og:image:height']
-					);
-
-			// fallback to the original url
-			if ( empty( $og_video['og:video:url'] ) && $fallback === true ) {
-				if ( ! $check_dupes || $this->p->util->is_uniq_url( $url ) )
-					$og_video['og:video:url'] = $url;
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log_arr( 'og_video after filters', $og_video );
 			}
 
-			if ( empty( $og_video['og:video:url'] ) && 
-				empty( $og_video['og:image'] ) ) 
-					return array();
-			else return $og_video;
+			// sanitation of media
+			foreach ( array( 'og:video', 'og:image' ) as $prefix ) {
+
+				$media_url = SucomUtil::get_mt_media_url( $og_video, $prefix );
+
+				// fallback to the original url
+				if ( empty( $media_url ) && $prefix === 'og:video' && $fallback ) {
+
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'no video returned by filters' );
+						$this->p->debug->log( 'falling back to embed url: '.$embed_url );
+					}
+
+					// define the og:video:secure_url meta tag if possible
+					if ( ! empty( $this->p->options['add_meta_property_og:video:secure_url'] ) ) {
+						$og_video['og:video:secure_url'] = strpos( $embed_url, 'https:' ) === 0 ? $embed_url : '';
+					}
+
+					$media_url = $og_video['og:video:url'] = $embed_url;
+
+					if ( preg_match( '/\.mp4(\?.*)?$/', $media_url ) ) {	// check for video/mp4
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'setting og:video:type = video/mp4' );
+						}
+						$og_video['og:video:type'] = 'video/mp4';
+					}
+				}
+
+				$have_media[$prefix] = empty( $media_url ) ? false : true;
+
+				// remove all meta tags if there's no media URL or media is a duplicate
+				if ( ! $have_media[$prefix] || ( $check_dupes && ! $this->p->util->is_uniq_url( $media_url, 'video' ) ) ) {
+
+					foreach( SucomUtil::preg_grep_keys( '/^'.$prefix.'(:.*)?$/', $og_video ) as $k => $v ) {
+						unset ( $og_video[$k] );
+					}
+
+				// if the media is an image, then check and add missing sizes
+				} elseif ( $prefix === 'og:image' ) {
+
+					if ( empty( $og_video['og:image:width'] ) || $og_video['og:image:width'] < 0 ||
+						empty( $og_video['og:image:height'] ) || $og_video['og:image:height'] < 0 ) {
+
+						// add correct image sizes for the image URL using getimagesize()
+						$this->p->util->add_image_url_size( 'og:image', $og_video );
+
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'returned / fetched video image url size: '.
+								$og_video['og:image:width'].'x'.$og_video['og:image:height'] );
+						}
+
+					} elseif ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'video image width / height values: '.
+							$og_video['og:image:width'].'x'.$og_video['og:image:height'] );
+					}
+				}
+			}
+
+			// if there's no video or preview image, then return an empty array
+			if ( ! $have_media['og:video'] && ! $have_media['og:image'] ) {
+				return array();
+			} else {
+				return $og_video;
+			}
+		}
+
+		// $img_name cam be an image ID or URL
+		// $src_name can be 'Media Library', 'NextGEN Gallery', 'Content', etc.
+		public function img_size_within_limits( $img_name, $size_name, $img_width, $img_height, $src_name = '' ) {
+
+			$lca = $this->p->cf['lca'];
+			$cf_min = $this->p->cf['head']['limit_min'];
+			$cf_max = $this->p->cf['head']['limit_max'];
+			$img_ratio = 0;
+
+			if ( strpos( $size_name, $lca.'-' ) !== 0 ) {	// only check our own sizes
+				return true;
+			}
+
+			if ( $src_name === '' ) {
+				$src_name = __( 'Media Library', 'nextgen-facebook' );
+			}
+
+			if ( is_numeric( $img_name ) ) {
+				$img_name = 'ID '.$img_name;
+			} elseif ( strpos( $img_name, '://' ) !== false ) {
+				if ( $img_width === NGFB_UNDEF_INT || $img_height === NGFB_UNDEF_INT ) {
+					list( $img_width, $img_height, $img_type, $img_attr ) = $this->p->util->get_image_url_info( $img_name );
+				}
+			}
+
+			// exit silently if width and/or height is not valid
+			if ( $img_width === NGFB_UNDEF_INT || $img_height === NGFB_UNDEF_INT ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: '.strtolower( $src_name ).' image '.$img_name.' rejected - '.
+						'invalid width and/or height '.$img_width.'x'.$img_height );
+				}
+				return false;	// image rejected
+			}
+
+			if ( $img_width > 0 && $img_height > 0 ) {
+				$img_ratio = $img_width >= $img_height ? $img_width / $img_height : $img_height / $img_width;
+			}
+
+			switch ( $size_name ) {
+				case $lca.'-opengraph':
+					$std_name = 'Facebook / Open Graph';
+					$min_width = $cf_min['og_img_width'];
+					$min_height = $cf_min['og_img_height'];
+					$max_ratio = $cf_max['og_img_ratio'];
+					break;
+
+				case $lca.'-schema':
+					$std_name = 'Google / Schema';
+					$min_width = $cf_min['schema_img_width'];
+					$min_height = $cf_min['schema_img_height'];
+					$max_ratio = $cf_max['schema_img_ratio'];
+					break;
+
+				case $lca.'-schema-article':
+					$std_name = 'Google / Schema Article';
+					$min_width = $cf_min['schema_article_img_width'];
+					$min_height = $cf_min['schema_article_img_height'];
+					$max_ratio = $cf_max['schema_article_img_ratio'];
+					break;
+
+				default:
+					$min_width = 0;
+					$min_height = 0;
+					$max_ratio = 0;
+					break;
+			}
+
+			// filter name example: ngfb_opengraph_img_size_limits
+			list( $min_width, $min_height, $max_ratio ) = apply_filters( SucomUtil::sanitize_hookname( $size_name ).'_img_size_limits',
+				array( $min_width, $min_height, $max_ratio ) );
+
+			// check the maximum image aspect ratio
+			if ( $max_ratio > 0 && $img_ratio >= $max_ratio ) {
+
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: '.strtolower( $src_name ).' image '.$img_name.' rejected - '.
+						$img_width.'x'.$img_height.' aspect ratio is equal to/or greater than '.$max_ratio.':1' );
+				}
+
+				if ( $this->p->notice->is_admin_pre_notices() ) {	// skip if notices already shown
+
+					$size_label = $this->p->util->get_image_size_label( $size_name );
+					$reject_notice = $this->p->msgs->get( 'notice-image-rejected', array(
+						'size_label' => $size_label,
+						'allow_upscale' => false
+					) );
+
+					$this->p->notice->err( sprintf( __( '%1$s image %2$s ignored &mdash; the resulting image of %3$s has an <strong>aspect ratio equal to/or greater than %4$d:1 allowed by the %5$s standard</strong>.', 'nextgen-facebook' ), $src_name, $img_name, $img_width.'x'.$img_height, $max_ratio, $std_name ).' '.$reject_notice );
+				}
+
+				return false;	// image rejected
+			}
+
+			// check the minimum image width and/or height
+			if ( ( $min_width > 0 || $min_height > 0 ) && ( $img_width < $min_width || $img_height < $min_height ) ) {
+
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: '.strtolower( $src_name ).' image '.$img_name.' rejected - '.
+						$img_width.'x'.$img_height.' smaller than minimum '.$min_width.'x'.$min_height.' for '.$size_name );
+				}
+
+				if ( $this->p->notice->is_admin_pre_notices() ) {	// skip if notices already shown
+					$size_label = $this->p->util->get_image_size_label( $size_name );
+					$reject_notice = $this->p->msgs->get( 'notice-image-rejected', array(
+						'size_label' => $size_label,
+						'allow_upscale' => true
+					) );
+					$this->p->notice->err( sprintf( __( '%1$s image %2$s ignored &mdash; the resulting image of %3$s is <strong>smaller than the minimum of %4$s allowed by the %5$s standard</strong>.', 'nextgen-facebook' ), $src_name, $img_name, $img_width.'x'.$img_height, $min_width.'x'.$min_height, $std_name ).' '.$reject_notice );
+				}
+
+				return false;	// image rejected
+			}
+
+			return true;	// image accepted
+		}
+
+		public function can_make_size( $img_meta, $size_info ) {
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			$full_width = empty( $img_meta['width'] ) ? 0 : $img_meta['width'];
+			$full_height = empty( $img_meta['height'] ) ? 0 : $img_meta['height'];
+
+			$is_sufficient_w = $full_width >= $size_info['width'] ? true : false;
+			$is_sufficient_h = $full_height >= $size_info['height'] ? true : false;
+
+			$img_cropped = empty( $size_info['crop'] ) ? 0 : 1;
+			$upscale_multiplier = 1;
+
+			if ( $this->p->options['plugin_upscale_images'] ) {
+				$img_info = (array) self::get_image_src_info();
+				$upscale_multiplier = 1 + ( apply_filters( $this->p->cf['lca'].'_image_upscale_max',
+					$this->p->options['plugin_upscale_img_max'], $img_info ) / 100 );
+				$upscale_full_width = round( $full_width * $upscale_multiplier );
+				$upscale_full_height = round( $full_height * $upscale_multiplier );
+				$is_sufficient_w = $upscale_full_width >= $size_info['width'] ? true : false;
+				$is_sufficient_h = $upscale_full_height >= $size_info['height'] ? true : false;
+			}
+
+
+			if ( ( ! $img_cropped && ( ! $is_sufficient_w && ! $is_sufficient_h ) ) ||
+				( $img_cropped && ( ! $is_sufficient_w || ! $is_sufficient_h ) ) ) {
+				$ret = false;
+			} else {
+				$ret = true;
+			}
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'full size image of '.$full_width.'x'.$full_height.( $upscale_multiplier !== 1 ?
+					' ('.$upscale_full_width.'x'.$upscale_full_height.' upscaled by '.$upscale_multiplier.')' : '' ).
+					( $ret ? ' sufficient' : ' too small' ).' to create size '.$size_info['width'].'x'.$size_info['height'].
+					( $img_cropped ? ' cropped' : '' ) );
+			}
+
+			return $ret;
+		}
+
+		public function add_og_video_from_url( array &$og_video, $url ) {
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			/*
+			 * Fetch HTML using the Facebook user agent to get Open Graph meta tags.
+			 *
+			 * get_head_meta( $request, $query, $libxml_errors, $curl_opts );
+			 */
+			$curl_opts = array( 'CURLOPT_USERAGENT' => WPSSO_PHP_CURL_USERAGENT_FACEBOOK );
+			$metas = $this->p->util->get_head_meta( $url, '//meta', false, $curl_opts );
+
+			if ( isset( $metas['meta'] ) ) {
+
+				foreach ( $metas as $m ) {		// loop through all meta tags
+					foreach ( $m as $a ) {		// loop through all attributes for that meta tag
+
+						$meta_type = key( $a );
+						$meta_name = reset( $a );
+						$meta_match = $meta_type.'-'.$meta_name;
+
+						switch ( $meta_match ) {
+
+							// use the property meta tag content as-is
+							case 'property-og:video:width':
+							case 'property-og:video:height':
+							case ( strpos( $meta_match, 'property-al:' ) === 0 ? true : false ):	// Facebook AppLink
+								if ( ! empty( $a['content'] ) ) {
+									$og_video[$a['property']] = $a['content'];
+								}
+								break;
+
+							// add the property meta tag content as an array
+							case 'property-og:video:tag':
+								if ( ! empty( $a['content'] ) ) {
+									$og_video[$a['property']][] = $a['content'];	// array of tags
+								}
+								break;
+
+							case 'property-og:image:secure_url':
+								if ( ! empty( $a['content'] ) ) {
+
+									// add the meta name as a query string to know where the value came from
+									$a['content'] = add_query_arg( 'm', $meta_name, $a['content'] );
+
+									if ( ! empty( $this->p->options['add_meta_property_og:image:secure_url'] ) ) {
+										$og_video['og:image:secure_url'] = $a['content'];
+									} else {
+										$og_video['og:image'] = $a['content'];
+									}
+
+									$og_video['og:video:thumbnail_url'] = $a['content'];
+									$og_video['og:video:has_image'] = true;
+								}
+								break;
+
+							case 'property-og:image:url':
+							case 'property-og:image':
+								if ( ! empty( $a['content'] ) ) {
+
+									// add the meta name as a query string to know where the value came from
+									$a['content'] = add_query_arg( 'm', $meta_name, $a['content'] );
+
+									if ( strpos( $a['content'], 'https:' ) === 0 &&
+										! empty( $this->p->options['add_meta_property_og:image:secure_url'] ) ) {
+										$og_video['og:image:secure_url'] = $a['content'];
+									}
+
+									$og_video['og:image'] = $a['content'];
+									$og_video['og:video:thumbnail_url'] = $a['content'];
+									$og_video['og:video:has_image'] = true;
+								}
+								break;
+
+							// add additional, non-standard properties
+							// like og:video:title and og:video:description
+							case 'property-og:title':
+							case 'property-og:description':
+								if ( ! empty( $a['content'] ) ) {
+									$og_key = 'og:video:'.substr( $a['property'], 3 );
+									$og_video[$og_key] = $this->p->util->cleanup_html_tags( $a['content'] );
+									if ( $this->p->debug->enabled ) {
+										$this->p->debug->log( 'adding '.$og_key.' = '.$og_video[$og_key] );
+									}
+								}
+								break;
+
+							// twitter:app:name:iphone
+							// twitter:app:id:iphone
+							// twitter:app:url:iphone
+							case ( strpos( $meta_match, 'name-twitter:app:' ) === 0 ? true : false ):	// Twitter Apps
+								if ( ! empty( $a['content'] ) ) {
+									if ( preg_match( '/^twitter:app:([a-z]+):([a-z]+)$/', $meta_name, $matches ) ) {
+										$og_video['og:video:'.$matches[2].'_'.$matches[1]] = $a['content'];
+									}
+								}
+								break;
+
+							case 'itemprop-datePublished':
+								if ( ! empty( $a['content'] ) ) {
+									$og_video['og:video:upload_date'] = gmdate( 'c', strtotime( $a['content'] ) );
+								}
+								break;
+
+							case 'itemprop-embedUrl':
+							case 'itemprop-embedURL':
+								if ( ! empty( $a['content'] ) ) {
+									$og_video['og:video:embed_url'] = $a['content'];
+								}
+								break;
+						}
+					}
+				}
+
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( $og_video );
+				}
+	
+			} elseif ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'no head meta found in '.$url );
+			}
 		}
 	}
 }
 
-?>

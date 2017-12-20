@@ -1,464 +1,686 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
-if ( ! class_exists( 'NgfbOpengraph' ) ) {
+if ( ! class_exists( 'NgfbOpenGraph' ) ) {
 
-	class NgfbOpengraph {
+	class NgfbOpenGraph {
 
 		protected $p;
 
 		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
 
-			$this->p->util->add_plugin_filters( $this, array( 
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			$this->p->util->add_plugin_filters( $this, array(
 				'plugin_image_sizes' => 1,
 			) );
 
-			if ( ! empty( $this->p->options['plugin_html_attr_filter_name'] ) &&
-				$this->p->options['plugin_html_attr_filter_name'] !== 'none' ) {
+			// hook the first available filter name (example: 'language_attributes')
+			foreach ( array( 'plugin_html_attr_filter', 'plugin_head_attr_filter' ) as $opt_prefix ) {
+				if ( ! empty( $this->p->options[$opt_prefix.'_name'] ) &&
+					$this->p->options[$opt_prefix.'_name'] !== 'none' ) {
 
-					$prio = empty( $this->p->options['plugin_html_attr_filter_prio'] ) ? 
-						100 : $this->p->options['plugin_html_attr_filter_prio'];
+					$wp_filter_name = $this->p->options[$opt_prefix.'_name'];
+					add_filter( $wp_filter_name, array( &$this, 'add_ogpns_attributes' ),
+						 ( isset( $this->p->options[$opt_prefix.'_prio'] ) ?
+						 	(int) $this->p->options[$opt_prefix.'_prio'] : 100 ), 1 );
 
-					// add open graph namespace attributes to the <html> tag
-					add_filter( $this->p->options['plugin_html_attr_filter_name'], 
-						array( &$this, 'add_html_attributes' ), $prio, 1 );
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'added add_ogpns_attributes filter for '.$wp_filter_name );
+					}
 
-			} elseif ( $this->p->debug->enabled )
-				$this->p->debug->log( 'add_html_attributes skipped: plugin_html_attr_filter_name option is empty' );
+					break;	// stop here
+
+				} elseif ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'skipping add_ogpns_attributes for '.
+						$opt_prefix.' - filter name is empty or disabled' );
+				}
+			}
 		}
 
 		public function filter_plugin_image_sizes( $sizes ) {
-			if ( ! SucomUtil::get_const( 'NGFB_RICH_PIN_DISABLE' ) ) {
-				$sizes['rp_img'] = array(
-					'name' => 'richpin',
-					'label' => _x( 'Pinterest Rich Pin',
-						'image size label', 'nextgen-facebook' ),
-				);
-			}
-			$sizes['og_img'] = array( 
-				'name' => 'opengraph', 
+
+			$sizes['og_img'] = array( 		// options prefix
+				'name' => 'opengraph',		// ngfb-opengraph
 				'label' => _x( 'Facebook / Open Graph',
 					'image size label', 'nextgen-facebook' ),
 			);
+
 			return $sizes;
 		}
 
-		public function add_html_attributes( $html_attr ) {
+		public function add_ogpns_attributes( $html_attr ) {
 
-			if ( $this->p->debug->enabled )
-				$this->p->debug->mark();
-			
-			$prefix_ns = apply_filters( $this->p->cf['lca'].'_og_prefix_ns', array(
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log_args( array (
+					'html_attr' => $html_attr,
+				) );
+			}
+
+			$lca = $this->p->cf['lca'];
+			$use_post = apply_filters( $lca.'_use_post', false );	// used by woocommerce with is_shop()
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'required call to get_page_mod()' );
+			}
+			$mod = $this->p->util->get_page_mod( $use_post );	// get post/user/term id, module name, and module object reference
+			$og_type = $this->get_og_type( $mod );
+
+			$og_ns = array(
 				'og' => 'http://ogp.me/ns#',
 				'fb' => 'http://ogp.me/ns/fb#',
-			) );
+			);
+
+			// check if the og_type is known and add it's namespace value
+			// example: product, place, website, etc.
+			if ( ! empty( $this->p->cf['head']['og_type_ns'][$og_type] ) )
+				$og_ns[$og_type] = $this->p->cf['head']['og_type_ns'][$og_type];
+
+			$og_ns = apply_filters( $lca.'_og_ns', $og_ns, $mod );
+
+			if ( SucomUtil::is_amp() ) {
+				// nothing to do				
+			} else {
+				$html_attr = ' '.$html_attr;	// prepare the string for testing
+
+				// find and extract an existing prefix attribute value (if any)
+				if ( strpos( $html_attr, ' prefix=' ) &&
+					preg_match( '/^(.*) prefix=["\']([^"\']*)["\'](.*)$/', $html_attr, $match ) ) {
+						$html_attr = $match[1].$match[3];	// remove the prefix
+						$prefix_value = ' '.$match[2];
+				} else $prefix_value = '';
 	
-			// find and extract an existing prefix attribute value
-			if ( strpos( $html_attr, ' prefix=' ) &&
-				preg_match( '/^(.*) prefix=["\']([^"\']*)["\'](.*)$/', $html_attr, $match ) ) {
-					$html_attr = $match[1].$match[3];
-					$prefix_value = ' '.$match[2];
-			} else $prefix_value = '';
-
-			foreach ( $prefix_ns as $ns => $url )
-				if ( strpos( $prefix_value, ' '.$ns.': '.$url ) === false )
-					$prefix_value .= ' '.$ns.': '.$url;
-
-			$html_attr .= ' prefix="'.trim( $prefix_value ).'"';
+				foreach ( $og_ns as $name => $url )
+					if ( strpos( $prefix_value, ' '.$name.': '.$url ) === false )
+						$prefix_value .= ' '.$name.': '.$url;
+	
+				$html_attr .= ' prefix="'.trim( $prefix_value ).'"';
+			}
 
 			return trim( $html_attr );
 		}
 
-		public function get_array( $use_post = false, $obj = false, &$og = array() ) {
+		public function get_og_type( array $mod ) {
 
-			if ( $this->p->debug->enabled )
-				$this->p->debug->mark();
+			$lca = $this->p->cf['lca'];
 
-			if ( ! is_object( $obj ) )
-				$obj = $this->p->util->get_post_object( $use_post );
-			$post_id = empty( $obj->ID ) || empty( $obj->post_type ) ||
-				! SucomUtil::is_post_page( $use_post ) ? 0 : $obj->ID;
+			// an index or static home page should always be 'website'
+			if ( $mod['is_home'] ) {
+				$og_type = 'website';
 
-			// counter for video previews found
-			$video_previews = 0;
+			// singular posts / pages are articles by default
+			} elseif ( $mod['is_post'] ) {
 
-			// a post_id of 0 returns the default plugin settings 
-			$max = $this->p->util->get_max_nums( $post_id, 'post' );
-			$og = apply_filters( $this->p->cf['lca'].'_og_seed', $og, $use_post, $obj );
-
-			if ( ! empty( $og ) && 
-				$this->p->debug->enabled ) {
-					$this->p->debug->log( $this->p->cf['lca'].'_og_seed filter returned:' );
-					$this->p->debug->log( $og );
-			}
-
-			if ( ! isset( $og['fb:admins'] ) && ! empty( $this->p->options['fb_admins'] ) )
-				foreach ( explode( ',', $this->p->options['fb_admins'] ) as $fb_admin )
-					$og['fb:admins'][] = trim( $fb_admin );
-
-			if ( ! isset( $og['fb:app_id'] ) )
-				$og['fb:app_id'] = $this->p->options['fb_app_id'];
-
-			if ( ! isset( $og['og:url'] ) )
-				$og['og:url'] = $this->p->util->get_sharing_url( $use_post, true, 
-					$this->p->util->get_source_id( 'opengraph' ) );
-
-			// define the type after the url
-			if ( ! isset( $og['og:type'] ) ) {
-
-				// singular posts / pages are articles by default
 				// check the post_type for a match with a known open graph type
-				if ( SucomUtil::is_post_page( $use_post ) ) {
-					if ( ! empty( $obj->post_type ) && 
-						isset( $this->p->cf['head']['og_type_ns'][$obj->post_type] ) )
-							$og['og:type'] = $obj->post_type;
-					else $og['og:type'] = 'article';
-
-				// check for default author info on indexes and searches
-				} elseif ( $this->p->util->force_default_author( $use_post, 'og' ) &&
-					! empty( $this->p->options['og_def_author_id'] ) ) {
-
-					$og['og:type'] = 'article';
-
-					// meta tag not defined or value is null
-					if ( ! isset( $og['article:author'] ) )
-						$og['article:author'] = $this->p->mods['util']['user']->get_author_profile_url( $this->p->options['og_def_author_id'] );
-
-				// default for everything else is 'website'
-				} else $og['og:type'] = 'website';
-
-				$og['og:type'] = apply_filters( $this->p->cf['lca'].'_og_type', $og['og:type'], $use_post );
-
-				// pre-define basic open graph meta tags for this type
-				if ( isset( $this->p->cf['head']['og_type_mt'][$og['og:type']] ) ) {
-					foreach( $this->p->cf['head']['og_type_mt'][$og['og:type']] as $mt_name ) {
-						if ( ! isset( $og[$mt_name] ) ) {
-							$og[$mt_name] = null;
-							if ( $this->p->debug->enabled )
-								$this->p->debug->log( $og['og:type'].' pre-defined mt: '.$mt_name );
-						}
-					}
-				}
-			}
-
-			if ( ! isset( $og['og:locale'] ) ) {
-				// get the current or configured language for og:locale
-				$lang = empty( $this->p->options['fb_lang'] ) ? 
-					SucomUtil::get_locale( $post_id ) : $this->p->options['fb_lang'];
-
-				$lang = apply_filters( $this->p->cf['lca'].'_lang', 
-					$lang, SucomUtil::get_pub_lang( 'facebook' ), $post_id );
-
-				$og['og:locale'] = $lang;
-			}
-
-			if ( ! isset( $og['og:site_name'] ) )
-				$og['og:site_name'] = $this->get_site_name( $post_id );
-
-			if ( ! isset( $og['og:title'] ) )
-				$og['og:title'] = $this->p->webpage->get_title( $this->p->options['og_title_len'], '...', $use_post );
-
-			if ( ! isset( $og['og:description'] ) )
-				$og['og:description'] = $this->p->webpage->get_description( $this->p->options['og_desc_len'], '...', $use_post );
-
-			// if the page is an article, then define the other article meta tags
-			if ( isset( $og['og:type'] ) && 
-				$og['og:type'] == 'article' ) {
-
-				// meta tag not defined or value is null
-				if ( ! isset( $og['article:author'] ) ) {
-					if ( SucomUtil::is_post_page( $use_post ) ) {
-						if ( ! empty( $obj->post_author ) )
-							$og['article:author'] = $this->p->mods['util']['user']->get_author_profile_url( $obj->post_author );
-						elseif ( ! empty( $this->p->options['og_def_author_id'] ) )
-							$og['article:author'] = $this->p->mods['util']['user']->get_author_profile_url( $this->p->options['og_def_author_id'] );
-					}
+				if ( ! empty( $mod['post_type'] ) &&
+					isset( $this->p->cf['head']['og_type_ns'][$mod['post_type']] ) ) {
+						$og_type = $mod['post_type'];
+				} else {
+					$og_type = empty( $this->p->options['og_post_type'] ) ?	// just in case
+						'article' : $this->p->options['og_post_type'];
 				}
 
-				// meta tag not defined or value is null
-				if ( ! isset( $og['article:publisher'] ) )
-					$og['article:publisher'] = $this->p->options['fb_publisher_url'];
-
-				// meta tag not defined or value is null
-				if ( ! isset( $og['article:tag'] ) )
-					$og['article:tag'] = $this->p->webpage->get_tags( $post_id );
-
-				// meta tag not defined or value is null
-				if ( ! isset( $og['article:section'] ) )
-					$og['article:section'] = $this->p->webpage->get_section( $post_id );
-
-				// meta tag not defined or value is null
-				if ( ! isset( $og['article:published_time'] ) )
-					$og['article:published_time'] = trim( get_post_time( 'c', null, $post_id ) );
-
-				// meta tag not defined or value is null
-				if ( ! isset( $og['article:modified_time'] ) )
-					$og['article:modified_time'] = trim( get_post_modified_time( 'c', null, $post_id ) );
+			// default for everything else is 'website'
+			} else {
+				$og_type = 'website';
 			}
 
-			// get all videos
-			// call before getting all images to find / use preview images
-			if ( ! isset( $og['og:video'] ) ) {
-				if ( empty( $max['og_vid_max'] ) ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'videos disabled: maximum videos = 0' );
-				} else {
-					$og['og:video'] = $this->get_all_videos( $max['og_vid_max'], $post_id, 'post', false, 'og' );
-					if ( ! empty( $og['og:video'] ) && is_array( $og['og:video'] ) ) {
-						foreach ( $og['og:video'] as $val )
-							if ( ! empty( $val['og:image'] ) )
-								$video_previews++;
-						if ( $video_previews > 0 ) {
-							$max['og_img_max'] -= $video_previews;
-							if ( $this->p->debug->enabled )
-								$this->p->debug->log( $video_previews.
-									' video preview images found (og_img_max adjusted to '.$max['og_img_max'].')' );
-						}
-					}
-				} 
-			}
-
-			// get all images
-			if ( ! isset( $og['og:image'] ) ) {
-				if ( empty( $max['og_img_max'] ) ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'images disabled: maximum images = 0' );
-				} else {
-					$crawler_name = SucomUtil::crawler_name();
-
-					if ( ! SucomUtil::get_const( 'NGFB_RICH_PIN_DISABLE' ) ) {
-						if ( is_admin() )
-							$img_sizes = array(
-								'rp' => $this->p->cf['lca'].'-richpin',
-								'og' => $this->p->cf['lca'].'-opengraph',
-							);
-						elseif ( $crawler_name === 'pinterest' )
-							$img_sizes = array( 'og' => $this->p->cf['lca'].'-richpin' );	// use the pinterest image size
-						else $img_sizes = array( 'og' => $this->p->cf['lca'].'-opengraph' );
-					} else $img_sizes = array( 'og' => $this->p->cf['lca'].'-opengraph' );
-
-					$size_count = count( $img_sizes );
-					$size_num = 0;
-					foreach ( $img_sizes as $md_pre => $size_name ) {
-						$check_dupes = ++$size_num < $size_count ?
-							false : true;
-
-						if ( $this->p->debug->enabled )
-							$this->p->debug->log( 'getting all images for '.$md_pre.' ('.$size_name.')' );
-
-						$og[$md_pre.':image'] = $this->get_all_images( $max['og_img_max'], 
-							$size_name, $post_id, $check_dupes, $md_pre );
-
-						switch ( $md_pre ) {
-							case 'rp':
-								foreach ( $og[$md_pre.':image'] as $num => $arr )
-									$og[$md_pre.':image'][$num] = SucomUtil::preg_grep_keys( '/^og:/',
-										$arr, false, 'pinterest:' );
-								break;
-							case 'og':
-								// if there's no image, and no video preview image, 
-								// then add the default image for singular webpages
-								if ( empty( $og[$md_pre.':image'] ) && $video_previews === 0 && 
-									SucomUtil::is_post_page( $use_post ) ) {
-									$og[$md_pre.':image'] = $this->p->media->get_default_image( $max['og_img_max'],
-										$size_name, $check_dupes );
-								}
-								break;
-						}
-					}
-				} 
-			}
-
-			return apply_filters( $this->p->cf['lca'].'_og', $og, $use_post, $obj );
+			return apply_filters( $lca.'_og_type', $og_type, $mod );
 		}
 
-		public function get_all_videos( $num = 0, $id, $mod = 'post', $check_dupes = true, $md_pre = 'og', $force_prev_img = false ) {
+		public function get_array( array $mod, array $mt_og, $crawler_name = false ) {
 
 			if ( $this->p->debug->enabled ) {
-				$this->p->debug->args( array( 
+				$this->p->debug->mark();
+			}
+
+			if ( $crawler_name === false ) {
+				$crawler_name = SucomUtil::get_crawler_name();
+			}
+
+			$lca = $this->p->cf['lca'];
+			$pdir = $this->p->avail['*']['p_dir'];
+			$aop = $this->p->check->aop( $lca, true, $pdir );
+			$max = $this->p->util->get_max_nums( $mod );
+			$post_id = $mod['is_post'] ? $mod['id'] : false;
+			$check_dupes = true;
+			$preview_count = 0;
+
+			$mt_og = apply_filters( $lca.'_og_seed', $mt_og, $mod );
+
+			if ( ! empty( $mt_og ) &&
+				$this->p->debug->enabled ) {
+				$this->p->debug->log( $lca.'_og_seed filter returned:' );
+				$this->p->debug->log( $mt_og );
+			}
+
+			if ( ! isset( $mt_og['fb:admins'] ) && ! empty( $this->p->options['fb_admins'] ) ) {
+				foreach ( explode( ',', $this->p->options['fb_admins'] ) as $fb_admin ) {
+					$mt_og['fb:admins'][] = trim( $fb_admin );
+				}
+			}
+
+			if ( ! isset( $mt_og['fb:app_id'] ) ) {
+				$mt_og['fb:app_id'] = $this->p->options['fb_app_id'];
+			}
+
+			if ( ! isset( $mt_og['og:url'] ) ) {
+				$mt_og['og:url'] = $this->p->util->get_sharing_url( $mod );
+			}
+
+			// define the type after the url
+			if ( ! isset( $mt_og['og:type'] ) ) {
+				$mt_og['og:type'] = $this->get_og_type( $mod );
+			} elseif ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'og:type already defined = '.$mt_og['og:type'] );
+			}
+
+			if ( ! isset( $mt_og['og:locale'] ) ) {
+				$mt_og['og:locale'] = $this->get_fb_locale( $this->p->options, $mod );	// localized
+			}
+
+			if ( ! isset( $mt_og['og:site_name'] ) ) {
+				$mt_og['og:site_name'] = SucomUtil::get_site_name( $this->p->options, $mod );	// localized
+			}
+
+			if ( ! isset( $mt_og['og:title'] ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'getting title for og:title meta tag' );
+				}
+				$mt_og['og:title'] = $this->p->page->get_title( $this->p->options['og_title_len'], '...', $mod );
+			}
+
+			if ( ! isset( $mt_og['og:description'] ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'getting description for og:description meta tag' );
+				}
+				$mt_og['og:description'] = $this->p->page->get_description( $this->p->options['og_desc_len'],
+					'...', $mod, true, $this->p->options['og_desc_hashtags'], true, 'og_desc' );
+			}
+
+			/*
+			 * Get all videos.
+			 *
+			 * Call before getting all images to find / use preview images.
+			 */
+			if ( ! isset( $mt_og['og:video'] ) && $aop ) {
+				if ( empty( $max['og_vid_max'] ) ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'videos disabled: maximum videos = 0' );
+					}
+				} else {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'getting videos for og:video meta tag' );
+					}
+					$mt_og['og:video'] = $this->get_all_videos( $max['og_vid_max'], $mod, $check_dupes, 'og' );
+
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'checking for video preview images' );
+					}
+					if ( ! empty( $mt_og['og:video'] ) && is_array( $mt_og['og:video'] ) ) {
+
+						foreach ( $mt_og['og:video'] as $num => $og_single_video ) {
+
+							$image_url = SucomUtil::get_mt_media_url( $og_single_video, 'og:image' );
+
+							/*
+							 * Check preview images for duplicates since the same videos may be available in
+							 * different formats (application/x-shockwave-flash and text/html for example).
+							 */
+							if ( $image_url && $this->p->util->is_uniq_url( $image_url, 'preview' ) ) {
+								$mt_og['og:video'][$num]['og:video:has_image'] = true;
+								$preview_count++;
+							} else {
+								$mt_og['og:video'][$num]['og:video:has_image'] = false;
+							}
+						}
+
+						if ( $preview_count > 0 ) {
+							$max['og_img_max'] -= $preview_count;
+							if ( $this->p->debug->enabled ) {
+								$this->p->debug->log( $preview_count.' video preview images found '.
+									'(og_img_max adjusted to '.$max['og_img_max'].')' );
+							}
+						} elseif ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'no video preview images found' );
+						}
+					}
+				}
+			}
+
+			/*
+			 * Get all images.
+			 */
+			if ( ! isset( $mt_og['og:image'] ) ) {
+				if ( empty( $max['og_img_max'] ) ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'images disabled: maximum images = 0' );
+					}
+				} else {
+					$img_sizes = array( 'og' => $lca.'-opengraph' );
+
+					foreach ( $img_sizes as $md_pre => $size_name ) {
+
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'getting images for '.$md_pre.' ('.$size_name.')' );
+						}
+
+						// the size_name is used as a context for duplicate checks
+						$mt_og[$md_pre.':image'] = $this->get_all_images( $max['og_img_max'],
+							$size_name, $mod, $check_dupes, $md_pre );
+
+						// if there's no image, and no video preview, then add the default image for singular (aka post) webpages
+						if ( empty( $mt_og[$md_pre.':image'] ) && ! $preview_count && $mod['is_post'] ) {
+							$mt_og[$md_pre.':image'] = $this->p->media->get_default_images( $max['og_img_max'],
+								$size_name, $check_dupes );
+						}
+					}
+				}
+			}
+
+			/*
+			 * Pre-define some basic open graph meta tags for this og:type. If the meta tag
+			 * has an associated meta option name, then read it's value from the meta options.
+			 */
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'checking og_type_mt array for known meta tags and md options' );
+			}
+			if ( isset( $this->p->cf['head']['og_type_mt'][$mt_og['og:type']] ) ) {	// check if og:type is in config
+
+				// optimize and call get_options() only once
+				// returns an empty string if no meta found
+				$md_opts = empty( $mod['obj'] ) ? array() : (array) $mod['obj']->get_options( $mod['id'] );
+
+				foreach( $this->p->cf['head']['og_type_mt'][$mt_og['og:type']] as $mt_name => $md_idx ) {
+
+					if ( $md_idx && isset( $md_opts[$md_idx] ) && $md_opts[$md_idx] !== '' ) {	// use custom value if available
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( $mt_og['og:type'].' meta tag '.$mt_name.' value from option = '.$md_opts[$md_idx] );
+						}
+						$mt_og[$mt_name] = $md_opts[$md_idx];
+					} elseif ( isset( $mt_og[$mt_name] ) ) {	// if the meta tag has not already been set
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( $mt_og['og:type'].' meta tag '.$mt_name.' original value kept = '.$mt_og[$mt_name] );
+						}
+					} else {
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( $mt_og['og:type'].' meta tag '.$mt_name.' pre-defined as null' );
+						}
+						$mt_og[$mt_name] = null;	// use null so isset() returns false
+					}
+				}
+
+				if ( isset( $mt_og['product:price:amount'] ) ) {
+					if ( is_numeric( $mt_og['product:price:amount'] ) ) {	// allow for price of 0
+						if ( empty( $mt_og['product:price:currency'] ) ) {
+							$mt_og['product:price:currency'] = $this->p->options['plugin_def_currency'];
+						}
+					} else {
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'product price amount must be numeric' );
+						}
+						unset( $mt_og['product:price:amount'] );
+						unset( $mt_og['product:price:currency'] );
+					}
+				}
+			}
+
+			/*
+			 * If the module is a post object, define the author, publishing date, etc.
+			 * These values may still be used by other filters, and if the og:type is
+			 * not an article, the meta tags will be sanitized at the end of
+			 * NgfbHead::get_head_array().
+			 */
+			if ( $mod['is_post'] && $post_id ) {
+
+				if ( ! isset( $mt_og['og:updated_time'] ) ) {
+					$mt_og['og:updated_time'] = trim( get_post_modified_time( 'c', true, $post_id ) );	// $gmt = true
+				}
+
+				if ( ! isset( $mt_og['article:author'] ) ) {
+
+					if ( $mod['is_post'] && isset( $this->p->m['util']['user'] ) ) {
+
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'getting names / urls for article:author meta tags' );
+						}
+
+						$user_mod =& $this->p->m['util']['user'];
+
+						if ( $mod['post_author'] ) {
+							$mt_og['article:author'] = $user_mod->get_og_profile_urls( $mod['post_author'], $crawler_name );
+							$mt_og['article:author:name'] = $user_mod->get_author_meta( $mod['post_author'],
+								$this->p->options['fb_author_name'] );
+						} else {
+							$mt_og['article:author'] = array();
+						}
+
+						if ( ! empty( $mod['post_coauthors'] ) ) {
+							$mt_og['article:author'] = array_merge( $mt_og['article:author'],
+								$user_mod->get_og_profile_urls( $mod['post_coauthors'], $crawler_name ) );
+						}
+					}
+				}
+
+				if ( ! isset( $mt_og['article:publisher'] ) ) {
+					$mt_og['article:publisher'] = SucomUtil::get_key_value( 'fb_publisher_url', $this->p->options, $mod );
+				}
+
+				if ( ! isset( $mt_og['article:tag'] ) ) {
+					$mt_og['article:tag'] = $this->p->page->get_tags( $post_id );
+				}
+
+				if ( ! isset( $mt_og['article:section'] ) ) {
+					$mt_og['article:section'] = $this->p->page->get_article_section( $post_id );
+				}
+
+				if ( ! isset( $mt_og['article:published_time'] ) ) {
+					$mt_og['article:published_time'] = trim( get_post_time( 'c', true, $post_id ) );	// $gmt = true
+				}
+
+				if ( ! isset( $mt_og['article:modified_time'] ) ) {
+					$mt_og['article:modified_time'] = trim( get_post_modified_time( 'c', true, $post_id ) );	// $gmt = true
+				}
+			}
+
+			return (array) apply_filters( $lca.'_og', $mt_og, $mod );
+		}
+
+		/*
+		 * Unset mis-matched og_type meta tags using the 'og_type_mt' array as a reference.
+		 * For example, remove all 'article' meta tags if the og_type is 'website'. Removing
+		 * only known meta tags (using the 'og_type_mt' array as a reference) protects
+		 * internal meta tags that may be used later by NgfbHead::extract_head_info().
+		 * For example, the schema:type:id and p:image meta tags.
+		 *
+		 * The 'og_content_map' array is also checked for Schema values that need to be
+		 * swapped for simpler Open Graph meta tag values.
+		 */
+		public function sanitize_array( array $mod, array $mt_og ) {
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			if ( empty( $mt_og['og:type'] ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'og:type is empty and required for sanitation' );
+				}
+				return $mt_og;
+			}
+
+			foreach ( $this->p->cf['head']['og_type_mt'] as $og_type => $mt_names ) {
+				foreach ( $mt_names as $mt_name => $md_idx ) {
+					if ( isset( $mt_og[$mt_name] ) ) {
+						if (  $og_type !== $mt_og['og:type'] ) {	// mis-matched meta tag for this og:type
+							if ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'removing extra meta tag '.$mt_name );
+							}
+							unset( $mt_og[$mt_name] );
+						} elseif ( isset( $this->p->cf['head']['og_content_map'][$mt_name][$mt_og[$mt_name]] ) ) {
+							if ( $this->p->debug->enabled ) {
+								$this->p->debug->log( 'mapping content value for '.$mt_name );
+							}
+							$mt_og[$mt_name] = $this->p->cf['head']['og_content_map'][$mt_name][$mt_og[$mt_name]];
+						}
+					}
+				}
+			}
+
+			return $mt_og;
+		}
+
+		public function get_all_videos( $num = 0, array $mod, $check_dupes = true, $md_pre = 'og', $force_prev = false ) {
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log_args( array(
 					'num' => $num,
-					'id' => $id,
 					'mod' => $mod,
 					'check_dupes' => $check_dupes,
 					'md_pre' => $md_pre,
-					'force_prev_img' => $force_prev_img,
+					'force_prev' => $force_prev,
 				) );
 			}
 
 			$og_ret = array();
-			$use_prev_img = $this->p->options['og_vid_prev_img'];	// default value
-			$num_remains = $this->p->media->num_remains( $og_ret, $num );
+			$lca = $this->p->cf['lca'];
+			$pdir = $this->p->avail['*']['p_dir'];
+			$aop = $this->p->check->aop( $lca, true, $pdir );
+			$use_prev = $this->p->options['og_vid_prev_img'];		// default option value is true/false
+			$num_diff = SucomUtil::count_diff( $og_ret, $num );
+			$this->p->util->clear_uniq_urls( 'video' );			// clear cache for 'video' context
 
-			// video modules are not available in the free version
-			if ( $this->p->check->aop() ) {
-				list( $id, $mod_obj ) = $this->p->util->get_mod_obj( $id, $mod );
-				if ( ! empty( $mod_obj ) ) {
-					if ( ( $mod_prev_img = $mod_obj->get_options( $id, 'og_vid_prev_img' ) ) !== null ) {
-						$use_prev_img = $mod_prev_img;
-						if ( $this->p->debug->enabled )
-							$this->p->debug->log( 'setting use_prev_img to '.
-								$use_prev_img.' from meta data' );
+			/*
+			 * Get video and preview enable/disable option from the post/term/user meta.
+			 */
+			if ( $aop && ! empty( $mod['obj'] ) ) {
+
+				// get_options() returns null if an index key is not found
+				if ( ( $mod_prev = $mod['obj']->get_options( $mod['id'], 'og_vid_prev_img' ) ) !== null ) {
+
+					$use_prev = $mod_prev;	// use true/false/1/0 value from the custom option
+
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'setting use_prev to '.( empty( $use_prev ) ?
+							'false' : 'true' ).' from meta data' );
 					}
-					$og_ret = array_merge( $og_ret, 
-						$mod_obj->get_og_video( $num_remains, 
-							$id, $check_dupes, $md_pre ) );
 				}
+
+				$og_ret = array_merge( $og_ret, $mod['obj']->get_og_videos( $num_diff, $mod['id'], $check_dupes, $md_pre ) );
 			}
 
-			if ( count( $og_ret ) < 1 && $this->p->util->force_default_video() )
-				return array_merge( $og_ret, $this->p->media->get_default_video( $num_remains, $check_dupes ) );
+			$num_diff = SucomUtil::count_diff( $og_ret, $num );
 
-			$num_remains = $this->p->media->num_remains( $og_ret, $num );
-
-			// if we haven't reached the limit of videos yet, keep going
-			if ( $mod === 'post' && 
-				! $this->p->util->is_maxed( $og_ret, $num ) )
-					$og_ret = array_merge( $og_ret, 
-						$this->p->media->get_content_videos( $num_remains, 
-							$id, $check_dupes ) );
+			/*
+			 * Optionally get more videos from the post content.
+			 */
+			if ( $mod['is_post'] && ! $this->p->util->is_maxed( $og_ret, $num ) ) {
+				$og_ret = array_merge( $og_ret, $this->p->media->get_content_videos( $num_diff, $mod, $check_dupes ) );
+			}
 
 			$this->p->util->slice_max( $og_ret, $num );
 
-			if ( empty( $use_prev_img ) && $force_prev_img === false ) {
-				if ( $this->p->debug->enabled )
-					$this->p->debug->log( 'use_prev_img is 0 and force_prev_img is false - removing video preview images' );
-				foreach ( $og_ret as $num => $og_video ) {
-					unset ( 
-						$og_ret[$num]['og:image'],
-						$og_ret[$num]['og:image:secure_url'],
-						$og_ret[$num]['og:image:width'],
-						$og_ret[$num]['og:image:height']
-					);
+			/*
+			 * Optionally remove the image meta tags (aka video preview).
+			 */
+			if ( empty( $use_prev ) && empty( $force_prev ) ) {
+
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'use_prev and force_prev are false - removing video preview images' );
+				}
+
+				foreach ( $og_ret as $num => $og_single_video ) {
+					foreach ( SucomUtil::preg_grep_keys( '/^og:image(:.*)?$/', $og_single_video ) as $k => $v ) {
+						unset ( $og_ret[$num][$k] );
+					}
+					$og_ret[$num]['og:video:has_image'] = false;
+				}
+			}
+
+			/*
+			 * If $md_pre is 'none' (special index keyword), then don't load custom video
+			 * title / description. Only the first video is given the custom title and
+			 * description (if one was entered). The og:video:title and og:video:description
+			 * meta tags are not standard and their values will only appear in Schema markup.
+			 */
+			if ( $aop && ! empty( $mod['obj'] ) && $md_pre !== 'none' ) {
+
+				foreach ( array(
+					'og_vid_title' => 'og:video:title',
+					'og_vid_desc' => 'og:video:description',
+				) as $idx => $mt_name ) {
+
+					// get_options() returns null if an index key is not found
+					$value = $mod['obj']->get_options( $mod['id'], $idx );
+
+					if ( ! empty( $value ) ) {	// must be a non-empty string
+						foreach ( $og_ret as $num => $og_single_video ) {
+							$og_ret[$num][$mt_name] = $value;
+							break;	// only do the first video
+						}
+					}
 				}
 			}
 
 			if ( ! empty( $this->p->options['og_vid_html_type'] ) ) {
+
 				$og_extend = array();
-				foreach ( $og_ret as $num => $og_video ) {
-					$og_extend[] = $og_video;
-					if ( ! empty( $og_video['og:video:embed_url'] ) ) {
-						$og_embed['og:video:url'] = $og_video['og:video:embed_url'];
-						$og_embed['og:video:type'] = 'text/html';		// define the type after the url
-						foreach ( array( 'og:video:width', 'og:video:height' ) as $key ) 
-							if ( isset( $og_video[$key] ) )
-								$og_embed[$key] = $og_video[$key];
-						$og_extend[] = $og_embed;
+
+				foreach ( $og_ret as $num => $og_single_video ) {
+
+					if ( ! empty( $og_single_video['og:video:embed_url'] ) ) {
+
+						// start with a copy of all og meta tags
+						$og_single_embed = SucomUtil::get_mt_prop_video( 'og', $og_single_video, false );
+
+						// exclude the facebook applink meta tags
+						$og_single_embed = SucomUtil::preg_grep_keys( '/^og:/', $og_single_embed );
+
+						if ( strpos( $og_single_video['og:video:embed_url'], 'https:' ) !== false ) {
+
+							if ( ! empty( $this->p->options['add_meta_property_og:video:secure_url'] ) ) {
+								$og_single_embed['og:video:secure_url'] = $og_single_video['og:video:embed_url'];
+							} else {
+								$og_single_embed['og:video:secure_url'] = '';	// just in case
+							}
+						}
+
+						$og_single_embed['og:video:url'] = $og_single_video['og:video:embed_url'];
+						$og_single_embed['og:video:type'] = 'text/html';
+
+						// embedded videos may not have width / height information
+						foreach ( array( 'og:video:width', 'og:video:height' ) as $mt_name ) {
+							if ( isset( $og_single_embed[$mt_name] ) && $og_single_embed[$mt_name] === '' ) {
+								unset( $og_single_embed[$mt_name] );
+							}
+						}
+
+						// add application/x-shockwave-flash video first and the text/html video second
+						if ( SucomUtil::get_mt_media_url( $og_single_video, 'og:video', array( ':secure_url', ':url', '' ) ) ) {
+							$og_extend[] = $og_single_video;
+						}
+
+						$og_extend[] = $og_single_embed;
+
+					} else {
+						$og_extend[] = $og_single_video;
 					}
 				}
 				return $og_extend;
-			} else return $og_ret;
+			} else {
+				return $og_ret;
+			}
 		}
 
-		public function get_all_images( $num = 0, $size_name = 'thumbnail', $post_id, $check_dupes = true, $md_pre = 'og' ) {
+		public function get_all_images( $num = 0, $size_name = 'thumbnail', array $mod, $check_dupes = true, $md_pre = 'og' ) {
 
-			if ( $this->p->debug->enabled )
-				$this->p->debug->args( array(
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log_args( array(
 					'num' => $num,
 					'size_name' => $size_name,
-					'post_id' => $post_id,
+					'mod' => $mod,
 					'check_dupes' => $check_dupes,
 					'md_pre' => $md_pre,
 				) );
+			}
 
 			$og_ret = array();
-			$force_regen = false;
-			$num_remains = $this->p->media->num_remains( $og_ret, $num );
+			$lca = $this->p->cf['lca'];
+			$num_diff = SucomUtil::count_diff( $og_ret, $num );
+			$force_regen = $this->p->util->is_force_regen( $mod, $md_pre );	// false by default
+			$this->p->util->clear_uniq_urls( $size_name );			// clear cache for $size_name context
 
-			// if requesting images for a specific post_id
-			if ( SucomUtil::is_post_page( $post_id ) ) {
+			if ( $mod['is_post'] ) {
 
 				// is_attachment() only works on the front-end, so check the post_type as well
-				if ( ( is_attachment( $post_id ) || get_post_type( $post_id ) === 'attachment' ) && 
-					wp_attachment_is_image( $post_id ) ) {
+				if ( ( is_attachment( $mod['id'] ) || get_post_type( $mod['id'] ) === 'attachment' ) &&
+					wp_attachment_is_image( $mod['id'] ) ) {
 
-					$og_image = $this->p->media->get_attachment_image( $num_remains, 
-						$size_name, $post_id, $check_dupes );
+					$og_single_image = $this->p->media->get_attachment_image( $num_diff,
+						$size_name, $mod['id'], $check_dupes );
 
 					// exiting early
-					if ( empty( $og_image ) )
-						return array_merge( $og_ret, $this->p->media->get_default_image( $num_remains, 
+					if ( empty( $og_single_image ) ) {
+						return array_merge( $og_ret, $this->p->media->get_default_images( $num_diff,
 							$size_name, $check_dupes, $force_regen ) );
-					else return array_merge( $og_ret, $og_image );
+					} else {
+						return array_merge( $og_ret, $og_single_image );
+					}
 				}
 
 				// check for custom meta, featured, or attached image(s)
-				// allow for empty post_id in order to execute featured/attached image filters for modules
-				if ( ! $this->p->util->is_maxed( $og_ret, $num ) )
-					$og_ret = array_merge( $og_ret, $this->p->media->get_post_images( $num_remains, 
-						$size_name, $post_id, $check_dupes, $md_pre ) );
+				// allow for empty post ID in order to execute featured / attached image filters for modules
+				if ( ! $this->p->util->is_maxed( $og_ret, $num ) ) {
+					$og_ret = array_merge( $og_ret, $this->p->media->get_post_images( $num_diff,
+						$size_name, $mod['id'], $check_dupes, $md_pre ) );
+				}
 
 				// check for ngg shortcodes and query vars
 				if ( ! $this->p->util->is_maxed( $og_ret, $num ) &&
-					$this->p->is_avail['media']['ngg'] && ! empty( $this->p->mods['media']['ngg'] ) ) {
-	
-					if ( $this->p->debug->enabled )
+					$this->p->avail['media']['ngg'] &&
+						! empty( $this->p->m['media']['ngg'] ) ) {
+
+					if ( $this->p->debug->enabled ) {
 						$this->p->debug->log( 'checking for ngg shortcodes and query vars' );
-	
+					}
+
 					// ngg pre-v2 used query arguments
 					$ngg_query_og_ret = array();
-					$num_remains = $this->p->media->num_remains( $og_ret, $num );
-					if ( version_compare( $this->p->mods['media']['ngg']->ngg_version, '2.0.0', '<' ) )
-						$ngg_query_og_ret = $this->p->mods['media']['ngg']->get_query_images( $num_remains, 
-							$size_name, $post_id, $check_dupes );
-	
+					$num_diff = SucomUtil::count_diff( $og_ret, $num );
+
+					if ( version_compare( $this->p->m['media']['ngg']->ngg_version, '2.0.0', '<' ) ) {
+						$ngg_query_og_ret = $this->p->m['media']['ngg']->get_query_images( $num_diff,
+							$size_name, $mod['id'], $check_dupes );
+					}
+
 					// if we found images in the query, skip content shortcodes
 					if ( count( $ngg_query_og_ret ) > 0 ) {
-						if ( $this->p->debug->enabled )
-							$this->p->debug->log( count( $ngg_query_og_ret ).
-								' image(s) returned - skipping additional shortcode images' );
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'skipping additional shortcode images: '.
+								count( $ngg_query_og_ret ).' image(s) returned' );
+						}
 						$og_ret = array_merge( $og_ret, $ngg_query_og_ret );
-	
+
 					// if no query images were found, continue with ngg shortcodes in content
 					} elseif ( ! $this->p->util->is_maxed( $og_ret, $num ) ) {
-						$num_remains = $this->p->media->num_remains( $og_ret, $num );
-						$og_ret = array_merge( $og_ret, 
-							$this->p->mods['media']['ngg']->get_shortcode_images( $num_remains, 
-								$size_name, $post_id, $check_dupes ) );
+						$num_diff = SucomUtil::count_diff( $og_ret, $num );
+						$og_ret = array_merge( $og_ret,
+							$this->p->m['media']['ngg']->get_shortcode_images( $num_diff,
+								$size_name, $mod['id'], $check_dupes ) );
 					}
 				} // end of check for ngg shortcodes and query vars
-	
+
 				// if we haven't reached the limit of images yet, keep going and check the content text
 				if ( ! $this->p->util->is_maxed( $og_ret, $num ) ) {
-					$num_remains = $this->p->media->num_remains( $og_ret, $num );
-					$og_ret = array_merge( $og_ret, $this->p->media->get_content_images( $num_remains, 
-						$size_name, $post_id, $check_dupes ) );
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'checking the content text for images' );
+					}
+					$num_diff = SucomUtil::count_diff( $og_ret, $num );
+					$og_ret = array_merge( $og_ret, $this->p->media->get_content_images( $num_diff,
+						$size_name, $mod, $check_dupes, $force_regen ) );
 				}
 
 			} else {
-				// check for priority media before using the default image
-				if ( SucomUtil::is_term_page() ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'is_term_page() = true' );
-					$term_id = $this->p->util->get_term_object( 'id' );
-					$og_ret = array_merge( $og_ret, $this->p->mods['util']['taxonomy']->get_og_image( $num_remains, 
-						$size_name, $term_id, $check_dupes, $force_regen, $md_pre ) );
-	
-					if ( ! $this->p->util->is_maxed( $og_ret, $num ) )
-						$og_ret = array_merge( $og_ret, $this->p->mods['util']['taxonomy']->get_term_images( $num_remains, 
-							$size_name, $term_id, $check_dupes, $force_regen, $md_pre ) );
-
-				} elseif ( SucomUtil::is_author_page() ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'is_author_page() = true' );
-					$author_id = $this->p->util->get_author_object( 'id' );
-					$og_ret = array_merge( $og_ret, $this->p->mods['util']['user']->get_og_image( $num_remains, 
-						$size_name, $author_id, $check_dupes, $force_regen, $md_pre ) );
+				// get_og_images() also provides filter hooks for additional image ids and urls
+				if ( ! empty( $mod['obj'] ) ) {	// term or user
+					$og_ret = array_merge( $og_ret, $mod['obj']->get_og_images( $num_diff,
+						$size_name, $mod['id'], $check_dupes, $force_regen, $md_pre ) );
 				}
-	
-				if ( count( $og_ret ) < 1 && $this->p->util->force_default_image() ) {
-					return array_merge( $og_ret, $this->p->media->get_default_image( $num_remains, 
+
+				if ( count( $og_ret ) < 1 && $this->p->util->force_default_image( $mod, 'og' ) ) {
+					return array_merge( $og_ret, $this->p->media->get_default_images( $num_diff,
 						$size_name, $check_dupes, $force_regen ) );
 				}
-	
-				$num_remains = $this->p->media->num_remains( $og_ret, $num );
 			}
 
 			$this->p->util->slice_max( $og_ret, $num );
@@ -466,86 +688,194 @@ if ( ! class_exists( 'NgfbOpengraph' ) ) {
 			return $og_ret;
 		}
 
-		public function get_site_name( $get = 'current' ) {
-			// provide options array to allow fallback if locale option does not exist
-			$key = SucomUtil::get_locale_key( 'og_site_name', $this->p->options, $get );
-			if ( ! empty( $this->p->options[$key] ) )
-				return $this->p->options[$key];
-			else return get_bloginfo( 'name', 'display' );
-		}
+		/*
+		 * The returned array can include a varying number of elements, depending on the $request value.
+		 */
+		public function get_media_info( $size_name, array $request, array $mod, $md_pre = 'og', $mt_pre = 'og', $head = array() ) {
 
-		// the returned array can include a varying number of elements, depending on the $items value
-		public function get_the_media_urls( $size_name = 'thumbnail', 
-			$post_id, $md_pre = 'og', $items = array( 'image', 'video' ) ) {
-
-			if ( $this->p->debug->enabled )
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->mark();
-			
+			}
+
 			$ret = array();
-			foreach ( $items as $item ) {
-				switch ( $item ) {
-					case 'pid':
-					case 'image':
-						if ( ! isset( $og_image ) )
-							$og_image = $this->get_all_images( 1, $size_name, $post_id, false, $md_pre );
-						break;
-					case 'video':
-					case 'preview':
-						if ( ! isset( $og_video ) )
-							$og_video = $this->get_all_videos( 1, $post_id, 'post', false, $md_pre, true );
-						break;
+			$lca = $this->p->cf['lca'];
+			$pdir = $this->p->avail['*']['p_dir'];
+			$aop = $this->p->check->aop( $lca, true, $pdir );
+			$og_images = null;
+			$og_videos = null;
+
+			if ( empty( $head ) ) {
+				foreach ( $request as $key ) {
+					switch ( $key ) {
+						case 'pid':
+						case ( preg_match( '/^(image|img)/', $key ) ? true : false ):
+							if ( $og_images === null ) {	// get images only once
+								$og_images = $this->get_all_images( 1, $size_name, $mod, false, $md_pre );
+							}
+							break;
+						case ( preg_match( '/^(vid|prev)/', $key ) ? true : false ):
+							if ( $og_videos === null && $aop ) {	// get videos only once
+								$og_videos = $this->get_all_videos( 1, $mod, false, $md_pre );	// $check_dupes = false
+							}
+							break;
+					}
 				}
-				switch ( $item ) {
+			} else {
+				$og_images = $og_videos = array( $head );
+			}
+
+			foreach ( $request as $key ) {
+				unset( $mt_name );
+				switch ( $key ) {
 					case 'pid':
-						$ret[] = $this->get_og_media_url( 'pid', $og_image );
-						break;
+						if ( ! isset( $mt_name ) ) {
+							$mt_name = $mt_pre.':image:id';
+						}
+						// no break - fall through
 					case 'image':
-						$ret[] = $this->get_og_media_url( 'image', $og_image );
+					case 'img_url':
+						if ( ! isset( $mt_name ) ) {
+							$mt_name = $mt_pre.':image';
+						}
+						// no break - fall through
+
+						if ( $og_videos !== null ) {
+							$ret[$key] = $this->get_media_value( $mt_name, $og_videos );
+						}
+
+						if ( empty( $ret[$key] ) ) {
+							$ret[$key] = $this->get_media_value( $mt_name, $og_images );
+						}
+
+						// if there's no image, and no video preview image,
+						// then add the default image for singular (aka post) webpages
+						if ( empty( $ret[$key] ) && $mod['is_post'] ) {
+							$og_images = $this->p->media->get_default_images( 1, $size_name, false );	// $check_dupes = false
+							$ret[$key] = $this->get_media_value( $mt_name, $og_images );
+						}
 						break;
 					case 'video':
-						$ret[] = $this->get_og_media_url( 'video', $og_video );
+					case 'vid_url':
+						$ret[$key] = $this->get_media_value( $mt_pre.':video', $og_videos );
 						break;
+					case 'vid_type':
+						$ret[$key] = $this->get_media_value( $mt_pre.':video:type', $og_videos );
+						break;
+					case 'vid_title':
+						$ret[$key] = $this->get_media_value( $mt_pre.':video:title', $og_videos );
+						break;
+					case 'vid_desc':
+						$ret[$key] = $this->get_media_value( $mt_pre.':video:description', $og_videos );
+						break;
+					case 'vid_width':
+						$ret[$key] = $this->get_media_value( $mt_pre.':video:width', $og_videos );
+						break;
+					case 'vid_height':
+						$ret[$key] = $this->get_media_value( $mt_pre.':video:height', $og_videos );
+						break;
+					case 'prev_url':
 					case 'preview':
-						$ret[] = $this->get_og_media_url( 'image', $og_video );
+						$ret[$key] = $this->get_media_value( $mt_pre.':video:thumbnail_url', $og_videos );
 						break;
 					default:
-						$ret[] = '';
+						$ret[$key] = '';
 						break;
 				}
 			}
 
-			if ( $this->p->debug->enabled )
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->log( $ret );
+			}
 
 			return $ret;
 		}
 
-		public function get_og_media_url( $name, $og, $mt_pre = 'og' ) {
-			if ( ! empty( $og ) && is_array( $og ) ) {
-				$media = reset( $og );
-				switch ( $name ) {
-					case 'pid':
-						$search = array(
-							$mt_pre.':image:id',
-						);
-						break;
-					default:
-						$search = array(
-							$mt_pre.':'.$name.':secure_url',
-							$mt_pre.':'.$name.':url',
-							$mt_pre.':'.$name,
-						);
-						break;
-				}
-				foreach ( $search as $key )
-					if ( isset( $media[$key] ) &&
-						! empty( $media[$key] ) &&
-							$media[$key] != -1 )
-								return $media[$key];
+		public function get_media_value( $prefix, $mt_og ) {
+
+			if ( empty( $mt_og ) || ! is_array( $mt_og ) ) {
+				return '';
 			}
+
+			$og_media = reset( $mt_og );	// only search the first media array
+
+			switch ( $prefix ) {
+				// if we're asking for an image or video url, then search all three values sequentially
+				case ( preg_match( '/:(image|video)(:secure_url|:url)?$/', $prefix ) ? true : false ):
+					$mt_search = array(
+						$prefix.':secure_url',	// og:image:secure_url
+						$prefix.':url',		// og:image:url
+						$prefix,		// og:image
+					);
+					break;
+				// otherwise, only search for that specific meta tag name
+				default:
+					$mt_search = array( $prefix );
+					break;
+			}
+
+			foreach ( $mt_search as $key ) {
+				if ( ! isset( $og_media[$key] ) ) {
+					continue;
+				} elseif ( $og_media[$key] === '' || $og_media[$key] === null ) {	// allow for 0
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( $og_media[$key].' value is empty (skipped)' );
+					}
+				} elseif ( $og_media[$key] === NGFB_UNDEF_INT || $og_media[$key] === (string) NGFB_UNDEF_INT ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( $og_media[$key].' value is '.NGFB_UNDEF_INT.' (skipped)' );
+					}
+				} else {
+					return $og_media[$key];
+				}
+			}
+
 			return '';
 		}
+
+		// returns an optional and customized locale value for the og:locale meta tag
+		// $mixed = 'default' | 'current' | post ID | $mod array
+		public function get_fb_locale( array $opts, $mixed = 'current' ) {
+
+			// check for customized locale
+			if ( ! empty( $opts ) ) {
+				$fb_locale_key = SucomUtil::get_key_locale( 'fb_locale', $opts, $mixed );
+				if ( ! empty( $opts[$fb_locale_key] ) ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'returning '.$fb_locale_key.' value from options: '.$opts[$fb_locale_key] );
+					}
+					return $opts[$fb_locale_key];
+				}
+			}
+
+			$locale = SucomUtil::get_locale( $mixed );
+			$def_locale = SucomUtil::get_locale( 'default' );
+			$fb_pub_lang = SucomUtil::get_pub_lang( 'facebook' );
+
+			// exceptions
+			switch ( $locale ) {
+				case 'de_DE_formal':
+					$locale = 'de_DE';
+					break;
+			}
+
+			if ( ! empty( $fb_pub_lang[$locale] ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'returning valid facebook locale: '.$locale );
+				}
+				return $locale;
+			} elseif ( ! empty( $fb_pub_lang[$def_locale] ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'returning default locale: '.$def_locale );
+				}
+				return $def_locale;
+			} else {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'returning fallback locale: en_US' );
+				}
+				return 'en_US';
+			}
+		}
+
 	}
 }
 
-?>

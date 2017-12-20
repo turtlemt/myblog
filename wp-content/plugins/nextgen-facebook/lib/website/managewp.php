@@ -1,64 +1,72 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
-if ( ! class_exists( 'NgfbSubmenuSharingManagewp' ) && class_exists( 'NgfbSubmenuSharing' ) ) {
+if ( ! class_exists( 'NgfbSubmenuWebsiteManagewp' ) ) {
 
-	class NgfbSubmenuSharingManagewp extends NgfbSubmenuSharing {
+	class NgfbSubmenuWebsiteManagewp {
 
-		public function __construct( &$plugin, $id, $name ) {
+		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
-			$this->website_id = $id;
-			$this->website_name = $name;
-			if ( $this->p->debug->enabled )
+
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->mark();
+			}
+
+			$this->p->util->add_plugin_filters( $this, array(
+				'website_managewp_rows' => 3,		// $table_rows, $form, $submenu
+			) );
 		}
 
-		protected function get_rows( $metabox, $key ) {
-			$rows = array();
+		public function filter_website_managewp_rows( $table_rows, $form, $submenu ) {
 
-			$rows[] = $this->p->util->get_th( _x( 'Show Button in',
-				'option label (short)', 'nextgen-facebook' ), 'short' ).'<td>'.
-			( $this->show_on_checkboxes( 'managewp' ) ).'</td>';
+			$table_rows[] = $form->get_th_html( _x( 'Show Button in',
+				'option label (short)', 'nextgen-facebook' ), 'short' ).
+			'<td>'.( $submenu->show_on_checkboxes( 'managewp' ) ).'</td>';
 
-			$rows[] = $this->p->util->get_th( _x( 'Preferred Order',
-				'option label (short)', 'nextgen-facebook' ), 'short' ).'<td>'.
-			$this->form->get_select( 'managewp_order', 
-				range( 1, count( $this->p->admin->submenu['sharing']->website ) ), 
-					'short' ).'</td>';
+			$table_rows[] = $form->get_th_html( _x( 'Preferred Order',
+				'option label (short)', 'nextgen-facebook' ), 'short' ).
+			'<td>'.$form->get_select( 'managewp_order', range( 1, count( $submenu->website ) ) ).'</td>';
 
-			$rows[] = $this->p->util->get_th( _x( 'Button Type',
-				'option label (short)', 'nextgen-facebook' ), 'short' ).'<td>'.
-			$this->form->get_select( 'managewp_type', 
-				array( 
-					'small' => 'Small',
-					'big' => 'Big',
-				)
-			).'</td>';
+			if ( $this->p->avail['*']['vary_ua'] ) {
+				$table_rows[] = '<tr class="hide_in_basic">'.
+				$form->get_th_html( _x( 'Allow for Platform',
+					'option label (short)', 'nextgen-facebook' ), 'short' ).
+				'<td>'.$form->get_select( 'managewp_platform', $this->p->cf['sharing']['platform'] ).'</td>';
+			}
 
-			return $rows;
+			$table_rows[] = $form->get_th_html( _x( 'Button Type',
+				'option label (short)', 'nextgen-facebook' ), 'short' ).
+			'<td>'.$form->get_select( 'managewp_type', array(
+				'small' => 'Small',
+				'big' => 'Big',
+			) ).'</td>';
+
+			return $table_rows;
 		}
 	}
 }
 
-if ( ! class_exists( 'NgfbSharingManagewp' ) ) {
+if ( ! class_exists( 'NgfbWebsiteManagewp' ) ) {
 
-	class NgfbSharingManagewp {
+	class NgfbWebsiteManagewp {
 
 		private static $cf = array(
 			'opt' => array(				// options
 				'defaults' => array(
+					'managewp_order' => 10,
 					'managewp_on_content' => 0,
 					'managewp_on_excerpt' => 0,
 					'managewp_on_sidebar' => 0,
 					'managewp_on_admin_edit' => 1,
-					'managewp_order' => 8,
+					'managewp_platform' => 'any',
 					'managewp_type' => 'small',
 				),
 			),
@@ -68,56 +76,41 @@ if ( ! class_exists( 'NgfbSharingManagewp' ) ) {
 
 		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
-			$this->p->util->add_plugin_filters( $this, array( 'get_defaults' => 1 ) );
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			$this->p->util->add_plugin_filters( $this, array(
+				'get_defaults' => 1,
+			) );
 		}
 
-		public function filter_get_defaults( $opts_def ) {
-			return array_merge( $opts_def, self::$cf['opt']['defaults'] );
+		public function filter_get_defaults( $def_opts ) {
+			return array_merge( $def_opts, self::$cf['opt']['defaults'] );
 		}
 
-		public function get_html( $atts = array(), &$opts = array() ) {
+		public function get_html( array $atts, array $opts, array $mod ) {
 			if ( $this->p->debug->enabled )
 				$this->p->debug->mark();
-			if ( empty( $opts ) ) 
-				$opts =& $this->p->options;
-			$prot = empty( $_SERVER['HTTPS'] ) ?
-				'http:' : 'https:';
-			$use_post = isset( $atts['use_post'] ) ?
-				$atts['use_post'] : true;
-			$src_id = $this->p->util->get_source_id( 'managewp', $atts );
-			$atts['add_page'] = isset( $atts['add_page'] ) ?
-				$atts['add_page'] : true;	// get_sharing_url argument
-
-			$atts['url'] = empty( $atts['url'] ) ? 
-				$this->p->util->get_sharing_url( $use_post, $atts['add_page'], $src_id ) : 
-				apply_filters( $this->p->cf['lca'].'_sharing_url', $atts['url'], 
-					$use_post, $atts['add_page'], $src_id );
 
 			if ( empty( $atts['title'] ) )
-				$atts['title'] = $this->p->webpage->get_title( 
-					null,				// max length
-					null,				// trailing
-					$use_post,			//
-					true,				// use_cache
-					false,				// add_hashtags
-					true,				// encode
-					null,				// metadata key
-					$src_id
-				);
+				$atts['title'] = $this->p->page->get_title( null, null, $mod, true, false, true, null );
 
-			$js_url = $this->p->util->get_cache_file_url( apply_filters( $this->p->cf['lca'].'_js_url_managewp', 
-				$prot.'//managewp.org/share.js#'.$prot.'//managewp.org/share', '' ) );
+			$js_url = $this->p->sharing->get_social_file_cache_url( apply_filters( $this->p->cf['lca'].'_js_url_managewp',
+				SucomUtil::get_prot().'://managewp.org/share.js#'.SucomUtil::get_prot().'://managewp.org/share', '' ) );
 
-			$html = '<!-- ManageWP Button --><div '.$this->p->sharing->get_css( 'managewp', $atts ).'>';
-			$html .= '<script type="text/javascript" src="'.$js_url.'" data-url="'.$atts['url'].'" data-title="'.$atts['title'].'"';
-			$html .= empty( $opts['managewp_type'] ) ? '' : ' data-type="'.$opts['managewp_type'].'"';
-			$html .= '></script></div>';
+			$html = '<!-- ManageWP Button -->'.
+			'<div '.SucomUtil::get_atts_css_attr( $atts, 'managewp' ).'>'.
+			'<script type="text/javascript" src="'.$js_url.'" data-url="'.$atts['url'].'" data-title="'.$atts['title'].'"'.
+			( empty( $opts['managewp_type'] ) ? '' : ' data-type="'.$opts['managewp_type'].'"' ).'></script></div>';
 
-			if ( $this->p->debug->enabled )
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->log( 'returning html ('.strlen( $html ).' chars)' );
-			return $html."\n";
+			}
+
+			return $html;
 		}
 	}
 }
 
-?>
