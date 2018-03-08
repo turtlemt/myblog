@@ -24,7 +24,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <?php wp_head(); ?>
 
-//Brian: Add gtm
+<!--Brian: Add gtm-->
 <script async src="https://www.googletagmanager.com/gtag/js?id=UA-66138731-1"></script>
 
 <!--[if lt IE 9]>
