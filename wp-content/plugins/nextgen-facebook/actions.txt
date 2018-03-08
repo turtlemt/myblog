@@ -1,0 +1,5 @@
+'ngfb_init_objects' ( $plugin_activate );
+'ngfb_init_plugin' ();
+'ngfb_init_textdomain' ( $debug_enabled );
+'ngfb_pre_apply_filters_text' ( $filter_name );
+'ngfb_after_apply_filters_text' ( $filter_name );

@@ -1,30 +1,33 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbUser' ) ) {
 
 	/*
 	 * This class is extended by gpl/util/user.php or pro/util/user.php
-	 * and the class object is created as $this->p->mods['util']['user'].
+	 * and the class object is created as $this->p->m['util']['user'].
 	 */
 	class NgfbUser extends NgfbMeta {
 
 		protected static $pref = array();
 
+		public function __construct() {
+		}
+
 		protected function add_actions() {
 
-			add_filter( 'user_contactmethods', 
-				array( &$this, 'add_contact_methods' ), 20, 2 );
+			$fb_cm_name_value = $this->p->options['plugin_cm_fb_name'];
 
-			$this->p->util->add_plugin_filters( $this, 
-				array( 'json_http_schema_org_person' => 6 ) );
+			add_filter( 'user_contactmethods', array( &$this, 'add_contact_methods' ), 20, 2 );
+			add_filter( 'user_'.$fb_cm_name_value.'_label', array( &$this, 'fb_contact_label' ), 20, 1 );
 
 			if ( is_admin() ) {
 				/**
@@ -33,32 +36,39 @@ if ( ! class_exists( 'NgfbUser' ) ) {
 				 * but missing when viewing our own profile page.
 				 */
 
-				// common to your profile and user editing pages
-				add_action( 'admin_init', array( &$this, 'add_metaboxes' ) );
-
-				// load_meta_page() priorities: 100 post, 200 user, 300 taxonomy
-				add_action( 'current_screen', array( &$this, 'load_meta_page' ), 200, 1 );
-
-				// the social settings metabox has moved to its own settings page
-				//add_action( 'show_user_profile', array( &$this, 'show_metabox_section' ), 20 );
-
-				if ( ! empty( $this->p->options['plugin_columns_user'] ) ) {
-
-					add_filter( 'manage_users_columns', 
-						array( $this, 'add_column_headings' ), 10, 1 );
-					add_filter( 'manage_users_custom_column', 
-						array( $this, 'get_user_column_content',), 10, 3 );
-	
-					$this->p->util->add_plugin_filters( $this, array( 
-						'og_image_user_column_content' => 4,
-						'og_desc_user_column_content' => 4,
-					) );
+				if ( ! empty( $_GET ) && ! isset( $_GET['updated'] ) ) {
+					// common to both profile and user editing pages
+					add_action( 'admin_init', array( &$this, 'add_meta_boxes' ) );
+					// load_meta_page() priorities: 100 post, 200 user, 300 term
+					// sets the NgfbMeta::$head_meta_tags and NgfbMeta::$head_meta_info class properties
+					add_action( 'current_screen', array( &$this, 'load_meta_page' ), 200, 1 );
 				}
 
+				add_filter( 'manage_users_columns', 
+					array( &$this, 'add_column_headings' ), NGFB_ADD_COLUMN_PRIORITY, 1 );
+
+				add_filter( 'manage_users_sortable_columns', 
+					array( &$this, 'add_sortable_columns' ), 10, 1 );
+
+				add_filter( 'manage_users_custom_column', 
+					array( &$this, 'get_column_content',), 10, 3 );
+
+				/*
+				 * The 'parse_query' action is hooked ONCE in the NgfbPost class
+				 * to set the column orderby for post, term, and user edit tables.
+				 *
+				 * add_action( 'parse_query', array( &$this, 'set_column_orderby' ), 10, 1 );
+				 */
+				add_action( 'get_user_metadata', array( &$this, 'check_sortable_metadata' ), 10, 4 );
+
 				// exit here if not a user or profile page
-				$user_id = SucomUtil::get_req_val( 'user_id' );
-				if ( empty( $user_id ) )
+				$user_id = SucomUtil::get_request_value( 'user_id' );	// uses sanitize_text_field
+				if ( empty( $user_id ) ) {
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'exiting early: empty user_id' );
+					}
 					return;
+				}
 
 				// hooks for user and profile editing
 				add_action( 'edit_user_profile', array( &$this, 'show_metabox_section' ), 20 );
@@ -73,271 +83,410 @@ if ( ! class_exists( 'NgfbUser' ) ) {
 			}
 		}
 
-		public function get_user_column_content( $value, $column_name, $id ) {
-			return $this->get_mod_column_content( $value, $column_name, $id, 'user' );
-		}
-
-		public function filter_og_image_user_column_content( $value, $column_name, $id, $mod ) {
-			if ( ! empty( $value ) )
-				return $value;
-
-			// use the open graph image dimensions to reject images that are too small
-			$size_name = $this->p->cf['lca'].'-opengraph';
-			$check_dupes = false;	// using first image we find, so dupe checking is useless
-			$force_regen = false;
-			$md_pre = 'og';
-			$og_image = array();
-
-			if ( empty( $og_image ) )
-				$og_image = $this->get_og_video_preview_image( $id, $mod, $check_dupes, $md_pre );
-
-			if ( empty( $og_image ) )
-				$og_image = $this->get_og_image( 1, $size_name, $id, $check_dupes, $force_regen, $md_pre );
-
-			if ( empty( $og_image ) )
-				$og_image = $this->p->media->get_default_image( 1, $size_name, $check_dupes, $force_regen );
-
-			if ( ! empty( $og_image ) && is_array( $og_image ) ) {
-				$image = reset( $og_image );
-				if ( ! empty( $image['og:image'] ) )
-					$value = $this->get_og_image_column_html( $image );
+		public function get_mod( $mod_id ) {
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
 			}
 
-			return $value;
+			$mod = NgfbMeta::$mod_defaults;
+			$mod['id'] = (int) $mod_id;
+			$mod['name'] = 'user';
+			$mod['obj'] =& $this;
+			/*
+			 * User
+			 */
+			$mod['is_user'] = true;
+
+			return apply_filters( $this->p->cf['lca'].'_get_user_mod', $mod, $mod_id );
 		}
 
-		public function filter_og_desc_user_column_content( $value, $column_name, $id, $mod ) {
-			if ( ! empty( $value ) )
-				return $value;
-
-			$author = get_userdata( $id );
-			if ( empty( $author->ID ) )
-				return $value;
-
-			$value = $this->p->util->get_mod_options( 'user', $author->ID, 'og_desc' );
-
-			if ( empty( $value ) ) {
-				if ( ! empty( $author->description ) )
-					$value = $author->description;
-				elseif ( ! empty( $author->display_name ) )
-					$value = sprintf( 'Authored by %s', $author->display_name );
-			}
-
-			return $value;
-		}
-
-		// hooked into the current_screen action
-		public function load_meta_page( $screen = false ) {
-
-			// all meta modules set this property, so use it to optimize code execution
-			if ( ! empty( NgfbMeta::$head_meta_tags ) 
-				|| ! isset( $screen->id ) )
-					return;
+		public function get_posts( array $mod, $posts_per_page = false, $paged = false ) {
 
 			if ( $this->p->debug->enabled ) {
 				$this->p->debug->mark();
+			}
+
+			if ( $posts_per_page === false ) {
+				$posts_per_page = apply_filters( $this->p->lca.'_posts_per_page', get_option( 'posts_per_page' ), $mod );
+			}
+
+			if ( $paged === false ) {
+				$paged = get_query_var( 'paged' );
+			}
+
+			if ( ! $paged > 1 ) {
+				$paged = 1;
+			}
+
+			$posts = get_posts( array(
+				'posts_per_page' => $posts_per_page,
+				'paged' => $paged,
+				'post_status' => 'publish',
+				'post_type' => 'any',
+				'has_password' => false,	// since wp 3.9
+				'author' => $mod['id'],
+			) );
+
+			return $posts;
+		}
+
+		public function add_column_headings( $columns ) { 
+			return $this->add_mod_column_headings( $columns, 'user' );
+		}
+
+		public function get_column_content( $value, $column_name, $user_id ) {
+			if ( ! empty( $user_id ) && strpos( $column_name, $this->p->lca.'_' ) === 0 ) {	// just in case
+				$col_idx = str_replace( $this->p->lca.'_', '', $column_name );
+				if ( ( $col_info = self::get_sortable_columns( $col_idx ) ) !== null ) {
+					if ( isset( $col_info['meta_key'] ) ) {	// just in case
+						// optimize and check wp_cache first
+						$meta_cache = wp_cache_get( $user_id, 'user_meta' );
+						if ( isset( $meta_cache[$col_info['meta_key']][0] ) ) {
+							$value = (string) maybe_unserialize( $meta_cache[$col_info['meta_key']][0] );
+						} else {
+							$value = (string) get_user_meta( $user_id, $col_info['meta_key'], true );	// $single = true
+						}
+						if ( $value === 'none' ) {
+							$value = '';
+						}
+					}
+				}
+			}
+			return $value;
+		}
+
+		public function update_sortable_meta( $user_id, $col_idx, $content ) { 
+			if ( ! empty( $user_id ) ) {	// just in case
+				if ( ( $sort_cols = self::get_sortable_columns( $col_idx ) ) !== null ) {
+					if ( isset( $sort_cols['meta_key'] ) ) {	// just in case
+						update_user_meta( $user_id, $sort_cols['meta_key'], $content );
+					}
+				}
+			}
+		}
+
+		public function check_sortable_metadata( $value, $user_id, $meta_key, $single ) {
+
+			static $do_once = array();
+
+			if ( strpos( $meta_key, '_'.$this->p->lca.'_head_info_' ) !== 0 ) {	// example: _ngfb_head_info_og_img_thumb
+				return $value;	// return null
+			}
+
+			if ( isset( $do_once[$user_id][$meta_key] ) ) {
+				return $value;	// return null
+			} else {
+				$do_once[$user_id][$meta_key] = true;	// prevent recursion
+			}
+
+			if ( get_user_meta( $user_id, $meta_key, true ) === '' ) {	// returns empty string if meta not found
+				$mod = $this->get_mod( $user_id );
+				$head_meta_tags = $this->p->head->get_head_array( false, $mod, true );	// $read_cache = true
+				$head_meta_info = $this->p->head->extract_head_info( $mod, $head_meta_tags );
+			}
+
+			return $value;	// return null
+		}
+
+		// hooked into the current_screen action
+		// sets the NgfbMeta::$head_meta_tags and NgfbMeta::$head_meta_info class properties
+		public function load_meta_page( $screen = false ) {
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			// all meta modules set this property, so use it to optimize code execution
+			if ( NgfbMeta::$head_meta_tags !== false || ! isset( $screen->id ) ) {
+				return;
+			}
+
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->log( 'screen id: '.$screen->id );
 			}
 
-			$lca = $this->p->cf['lca'];
 			switch ( $screen->id ) {
-				case 'profile':
-				case 'user-edit':
-				case ( strpos( $screen->id, 'profile_page_' ) === 0 ? true : false ):
-				case ( strpos( $screen->id, 'users_page_' ) === 0 ? true : false ):
+				case 'profile':		// user profile page
+				case 'user-edit':	// user editing page
+				case ( strpos( $screen->id, 'profile_page_' ) === 0 ? true : false ):		// your profile page
+				case ( strpos( $screen->id, 'users_page_'.$this->p->lca ) === 0 ? true : false ):	// custom social settings page
 					break;
 				default:
 					return;
 					break;
 			}
 
-			$user_id = $this->p->util->get_author_object( 'id' );
-			$add_metabox = empty( $this->p->options[ 'plugin_add_to_user' ] ) ? false : true;
+			$user_id = SucomUtil::get_user_object( false, 'id' );
+			$mod = $this->get_mod( $user_id );
 
-			if ( apply_filters( $this->p->cf['lca'].'_add_metabox_user', 
-				$add_metabox, $user_id, $screen->id ) === true ) {
-
-				do_action( $this->p->cf['lca'].'_admin_user_header', $user_id, $screen->id );
-
-				// use_post is false since this isn't a post
-				// read_cache is false to generate notices etc.
-				NgfbMeta::$head_meta_tags = $this->p->head->get_header_array( false, false );
-				NgfbMeta::$head_meta_info = $this->p->head->extract_head_info( NgfbMeta::$head_meta_tags );
-
-				if ( empty( NgfbMeta::$head_meta_info['og:image'] ) )
-					// check for missing open graph image and issue warning
-					$this->p->notice->err( $this->p->msgs->get( 'notice-missing-og-image' ) );
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'home url = '.get_option( 'home' ) );
+				$this->p->debug->log( 'locale default = '.SucomUtil::get_locale( 'default' ) );
+				$this->p->debug->log( 'locale current = '.SucomUtil::get_locale( 'current' ) );
+				$this->p->debug->log( 'locale mod = '.SucomUtil::get_locale( $mod ) );
+				$this->p->debug->log( SucomDebug::pretty_array( $mod ) );
 			}
 
-			$action_query = $lca.'-action';
+			$add_metabox = empty( $this->p->options[ 'plugin_add_to_user' ] ) ? false : true;
+			$add_metabox = apply_filters( $this->p->lca.'_add_metabox_user', $add_metabox, $user_id );
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'add metabox for user ID '.$user_id.' is '.
+					( $add_metabox ? 'true' : 'false' ) );
+			}
+
+			if ( $add_metabox ) {
+
+				do_action( $this->p->lca.'_admin_user_head', $mod, $screen->id );
+
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'setting head_meta_info static property' );
+				}
+
+				// $read_cache is false to generate notices etc.
+				NgfbMeta::$head_meta_tags = $this->p->head->get_head_array( false, $mod, false );
+				NgfbMeta::$head_meta_info = $this->p->head->extract_head_info( $mod, NgfbMeta::$head_meta_tags );
+
+				// check for missing open graph image and description values
+				foreach ( array( 'image', 'description' ) as $mt_suffix ) {
+					if ( empty( NgfbMeta::$head_meta_info['og:'.$mt_suffix] ) ) {
+						if ( $this->p->debug->enabled ) {
+							$this->p->debug->log( 'og:'.$mt_suffix.' meta tag is value empty and required' );
+						}
+						if ( $this->p->notice->is_admin_pre_notices() ) {	// skip if notices already shown
+							$this->p->notice->err( $this->p->msgs->get( 'notice-missing-og-'.$mt_suffix ) );
+						}
+					}
+				}
+
+			} else {
+				NgfbMeta::$head_meta_tags = array();
+			}
+
+			$action_query = $this->p->lca.'-action';
+
 			if ( ! empty( $_GET[$action_query] ) ) {
 				$action_name = SucomUtil::sanitize_hookname( $_GET[$action_query] );
-				if ( empty( $_GET[ NGFB_NONCE ] ) ) {
-					if ( $this->p->debug->enabled )
-						$this->p->debug->log( 'nonce token validation query field missing' );
-				} elseif ( ! wp_verify_nonce( $_GET[ NGFB_NONCE ], NgfbAdmin::get_nonce() ) ) {
-					$this->p->notice->err( __( 'Nonce token validation failed for action \"'.$action_name.'\".', 'nextgen-facebook' ) );
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'found action query: '.$action_name );
+				}
+				if ( empty( $_GET[ NGFB_NONCE_NAME ] ) ) {	// NGFB_NONCE_NAME is an md5() string
+					if ( $this->p->debug->enabled ) {
+						$this->p->debug->log( 'nonce token query field missing' );
+					}
+				} elseif ( ! wp_verify_nonce( $_GET[ NGFB_NONCE_NAME ], NgfbAdmin::get_nonce_action() ) ) {
+					$this->p->notice->err( sprintf( __( 'Nonce token validation failed for %1$s action "%2$s".',
+						'nextgen-facebook' ), 'user', $action_name ) );
 				} else {
-					$_SERVER['REQUEST_URI'] = remove_query_arg( array( $action_query, NGFB_NONCE ) );
+					$_SERVER['REQUEST_URI'] = remove_query_arg( array( $action_query, NGFB_NONCE_NAME ) );
 					switch ( $action_name ) {
 						default: 
-							do_action( $lca.'_load_meta_page_user_'.$action_name, $user_id, $screen->id );
+							do_action( $this->p->lca.'_load_meta_page_user_'.$action_name, $user_id, $screen->id );
 							break;
 					}
 				}
 			}
 		}
 
-		public function add_metaboxes() {
-			$user_id = $this->p->util->get_author_object( 'id' );
+		public function add_meta_boxes() {
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			$user_id = SucomUtil::get_user_object( false, 'id' );
+
 			if ( ! current_user_can( 'edit_user', $user_id ) ) {
-				if ( $this->p->debug->enabled )
+				if ( $this->p->debug->enabled ) {
 					$this->p->debug->log( 'insufficient privileges to add metabox for user ID '.$user_id );
+				}
 				return;
 			}
+
+			$metabox_id = $this->p->cf['meta']['id'];
+			$metabox_title = _x( $this->p->cf['meta']['title'], 'metabox title', 'nextgen-facebook' );
 			$add_metabox = empty( $this->p->options[ 'plugin_add_to_user' ] ) ? false : true;
-			if ( apply_filters( $this->p->cf['lca'].'_add_metabox_user', $add_metabox ) === true )
-				add_meta_box( NGFB_META_NAME, _x( 'Social Settings', 'metabox title', 'nextgen-facebook' ),
-					array( &$this, 'show_metabox_user' ), 'user', 'normal', 'low' );
+			$add_metabox = apply_filters( $this->p->lca.'_add_metabox_user', $add_metabox, $user_id );
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'add metabox for user ID '.$user_id.' is '.
+					( $add_metabox ? 'true' : 'false' ) );
+			}
+
+			if ( $add_metabox ) {
+				add_meta_box( $this->p->lca.'_'.$metabox_id, $metabox_title,
+					array( &$this, 'show_metabox_custom_meta' ),
+						$this->p->lca.'-user', 'normal', 'low' );
+			}
 		}
 
 		public function show_metabox_section( $user ) {
-			if ( ! current_user_can( 'edit_user', $user->ID ) )
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			if ( ! current_user_can( 'edit_user', $user->ID ) ) {
+				if ( $this->p->debug->enabled ) {
+					$this->p->debug->log( 'exiting early: current user does not have edit privileges for user ID '.$user->ID );
+				}
 				return;
+			}
 
-			$lca = $this->p->cf['lca'];
-			$is_suffix = ' '.( $this->p->check->aop( $lca, 
-				true, $this->p->is_avail['aop'] ) ? 
-					_x( 'Pro', 'package type', 'wpsso' ) :
-					_x( 'Free', 'package type', 'wpsso' ) );
+			echo "\n".'<!-- '.$this->p->lca.' user metabox section begin -->'."\n";
+			echo '<h3 id="'.$this->p->lca.'-metaboxes">'.NgfbAdmin::$pkg[$this->p->lca]['short'].'</h3>'."\n";
+			echo '<div id="poststuff">'."\n";
 
-			echo '<h3 id="'.$lca.'-metaboxes">'.
-				$this->p->cf['plugin'][$lca]['name'].
-				$is_suffix.'</h3>'."\n";
-			echo '<div id="poststuff">';
-			do_meta_boxes( 'user', 'normal', $user );
-			echo '</div>'."\n";
+			do_meta_boxes( $this->p->lca.'-user', 'normal', $user );
+
+			echo "\n".'</div><!-- .poststuff -->'."\n";
+			echo '<!-- '.$this->p->lca.' user metabox section end -->'."\n";
 		}
 
-		public function show_metabox_user( $user ) {
-			$opts = $this->get_options( $user->ID );
-			$def_opts = $this->get_defaults();
-			NgfbMeta::$head_meta_info['post_id'] = false;
+		public function show_metabox_custom_meta( $user_obj ) {
 
-			$this->form = new SucomForm( $this->p, NGFB_META_NAME, $opts, $def_opts );
-			wp_nonce_field( NgfbAdmin::get_nonce(), NGFB_NONCE );
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
 
-			$metabox = 'user';
-			$tabs = apply_filters( $this->p->cf['lca'].'_'.$metabox.'_tabs',
-				$this->get_default_tabs(), $user );
-			if ( empty( $this->p->is_avail['mt'] ) )
-				unset( $tabs['tags'] );
+			$metabox_id = $this->p->cf['meta']['id'];
+			$mod = $this->get_mod( $user_obj->ID );
+			$tabs = $this->get_custom_meta_tabs( $metabox_id, $mod );
+			$opts = $this->get_options( $user_obj->ID );
+			$def_opts = $this->get_defaults( $user_obj->ID );
+			$this->form = new SucomForm( $this->p, NGFB_META_NAME, $opts, $def_opts, $this->p->lca );
 
-			$rows = array();
-			foreach ( $tabs as $key => $title )
-				$rows[$key] = array_merge( $this->get_rows( $metabox, $key, NgfbMeta::$head_meta_info ), 
-					apply_filters( $this->p->cf['lca'].'_'.$metabox.'_'.$key.'_rows', 
-						array(), $this->form, NgfbMeta::$head_meta_info ) );
-			$this->p->util->do_tabs( $metabox, $tabs, $rows );
+			wp_nonce_field( NgfbAdmin::get_nonce_action(), NGFB_NONCE_NAME );
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark( $metabox_id.' table rows' );	// start timer
+			}
+
+			$table_rows = array();
+			foreach ( $tabs as $key => $title ) {
+				$table_rows[$key] = array_merge( $this->get_table_rows( $metabox_id, $key, NgfbMeta::$head_meta_info, $mod ), 
+					apply_filters( $this->p->lca.'_'.$mod['name'].'_'.$key.'_rows', array(), $this->form, NgfbMeta::$head_meta_info, $mod ) );
+			}
+			$this->p->util->do_metabox_tabs( $metabox_id, $tabs, $table_rows );
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark( $metabox_id.' table rows' );	// end timer
+			}
 		}
 
-		public function get_display_names() {
-			$user_ids = array();
-			foreach ( get_users() as $user ) 
-				$user_ids[$user->ID] = $user->display_name;
-			$user_ids[0] = 'none';
-			return $user_ids;
+		public function get_form_display_names( $roles = array( 'author', 'editor', 'administrator' ) ) {
+			foreach ( $roles as $role ) {
+				$query_args = array( 
+					'role' => $role,
+					'fields' => array( 'ID', 'display_name' ),
+				);
+				foreach ( get_users( $query_args ) as $user ) 
+					$user_ids[$user->ID] = $user->display_name;
+			}
+			asort( $user_ids );
+			return array_merge( array( 0 => 'none' ), $user_ids );
 		}
 
-		public function get_contact_fields( $fields = array() ) { 
+		public function get_form_contact_fields( $fields = array() ) { 
 			return array_merge( 
-				array( 'none' => '[none]' ), 	// make sure none is first
-				$this->add_contact_methods( 
-					array( 
-						'author' => 'Author Index', 
-						'url' => 'Website'
-					)
-				)
+				array( 'none' => '[None]' ), 	// make sure none is first
+				$this->add_contact_methods( array( 
+					'author' => 'Author Archive', 
+					'url' => 'WebSite'
+				) )
 			);
 		}
 
 		public function add_contact_methods( $fields = array(), $user = null ) { 
+
+			$aop = $this->p->check->aop( $this->p->lca, true, $this->p->avail['*']['p_dir'] );
+
+			// unset built-in contact fields and/or update their labels
+			if ( ! empty( $this->p->cf['wp']['cm_names'] ) && is_array( $this->p->cf['wp']['cm_names'] ) && $aop ) {
+
+				foreach ( $this->p->cf['wp']['cm_names'] as $id => $desc ) {
+
+					$cm_enabled_key = 'wp_cm_'.$id.'_enabled';
+					$cm_label_key = 'wp_cm_'.$id.'_label';
+
+					if ( isset( $this->p->options[$cm_enabled_key] ) ) {
+						if ( ! empty( $this->p->options[$cm_enabled_key] ) ) {
+							$cm_label_value = SucomUtil::get_key_value( $cm_label_key, $this->p->options );
+							if ( ! empty( $cm_label_value ) ) {	// just in case
+								$fields[$id] = $cm_label_value;
+							}
+						} else {
+							unset( $fields[$id] );
+						}
+					}
+				}
+			}
+
 			// loop through each social website option prefix
-			if ( ! empty( $this->p->cf['opt']['pre'] ) && 
-				is_array( $this->p->cf['opt']['pre'] ) ) {
+			if ( ! empty( $this->p->cf['opt']['cm_prefix'] ) && is_array( $this->p->cf['opt']['cm_prefix'] ) ) {
 
-				foreach ( $this->p->cf['opt']['pre'] as $id => $pre ) {
-					$cm_opt = 'plugin_cm_'.$pre.'_';
+				foreach ( $this->p->cf['opt']['cm_prefix'] as $id => $opt_pre ) {
+
+					$cm_enabled_key = 'plugin_cm_'.$opt_pre.'_enabled';
+					$cm_name_key = 'plugin_cm_'.$opt_pre.'_name';
+					$cm_label_key = 'plugin_cm_'.$opt_pre.'_label';
+
 					// not all social websites have a contact fields, so check
-					if ( array_key_exists( $cm_opt.'name', $this->p->options ) ) {
-						$enabled = $this->p->options[$cm_opt.'enabled'];
-						$name = $this->p->options[$cm_opt.'name'];
-						$label = $this->p->options[$cm_opt.'label'];
-						if ( ! empty( $enabled ) && 
-							! empty( $name ) && 
-							! empty( $label ) )
-								$fields[$name] = $label;
+					if ( isset( $this->p->options[$cm_name_key] ) ) {
+						if ( ! empty( $this->p->options[$cm_enabled_key] ) && ! empty( $this->p->options[$cm_name_key] ) ) {
+							$cm_label_value = SucomUtil::get_key_value( $cm_label_key, $this->p->options );
+							if ( ! empty( $cm_label_value ) ) {	// just in case
+								$fields[$this->p->options[$cm_name_key]] = $cm_label_value;
+							}
+						}
 					}
 				}
 			}
-			if ( $this->p->check->aop() && 
-				! empty( $this->p->cf['wp']['cm'] ) && 
-				is_array( $this->p->cf['wp']['cm'] ) ) {
 
-				foreach ( $this->p->cf['wp']['cm'] as $id => $name ) {
-					$cm_opt = 'wp_cm_'.$id.'_';
-					if ( array_key_exists( $cm_opt.'enabled', $this->p->options ) ) {
-						$enabled = $this->p->options[$cm_opt.'enabled'];
-						$label = $this->p->options[$cm_opt.'label'];
-						if ( ! empty( $enabled ) ) {
-							if ( ! empty( $label ) )
-								$fields[$id] = $label;
-						} else unset( $fields[$id] );
-					}
-				}
-			}
-			ksort( $fields, SORT_STRING );
+			asort( $fields );	// sort associative array by value
+
 			return $fields;
 		}
 
+		public function fb_contact_label( $label ) { 
+			return $label.'<br/><span class="description">'.
+				__( '(not a Facebook Page URL)', 'nextgen-facebook' ).'</span>';
+		}
+
 		public function sanitize_submit_cm( $user_id ) {
-			if ( ! current_user_can( 'edit_user', $user_id ) )
+
+			if ( ! current_user_can( 'edit_user', $user_id ) ) {
 				return;
+			}
 
-			foreach ( $this->p->cf['opt']['pre'] as $id => $pre ) {
-				$cm_opt = 'plugin_cm_'.$pre.'_';
+			foreach ( $this->p->cf['opt']['cm_prefix'] as $id => $opt_pre ) {
+
 				// not all social websites have contact fields, so check
-				if ( array_key_exists( $cm_opt.'name', $this->p->options ) ) {
+				if ( isset( $this->p->options['plugin_cm_'.$opt_pre.'_name'] ) ) {
 
-					$enabled = $this->p->options[$cm_opt.'enabled'];
-					$name = $this->p->options[$cm_opt.'name'];
-					$label = $this->p->options[$cm_opt.'label'];
+					$cm_enabled_value = $this->p->options['plugin_cm_'.$opt_pre.'_enabled'];
+					$cm_name_value = $this->p->options['plugin_cm_'.$opt_pre.'_name'];
 
-					if ( isset( $_POST[$name] ) && 
-						! empty( $enabled ) && 
-						! empty( $name ) && 
-						! empty( $label ) ) {
+					// sanitize values only for those enabled contact methods
+					if ( isset( $_POST[$cm_name_value] ) && ! empty( $cm_enabled_value ) && ! empty( $cm_name_value ) ) {
 
-						// sanitize values only for those enabled contact methods
-						$val = wp_filter_nohtml_kses( $_POST[$name] );
-						if ( ! empty( $val ) ) {
-							switch ( $name ) {
+						$value = wp_filter_nohtml_kses( $_POST[$cm_name_value] );
+
+						if ( ! empty( $value ) ) {
+							switch ( $cm_name_value ) {
 								case $this->p->options['plugin_cm_skype_name']:
 									// no change
 									break;
 								case $this->p->options['plugin_cm_twitter_name']:
-									$val = substr( preg_replace( '/[^a-zA-Z0-9_]/', '', $val ), 0, 15 );
-									if ( ! empty( $val ) ) 
-										$val = '@'.$val;
+									$value = SucomUtil::get_at_name( $value );
 									break;
 								default:
 									// all other contact methods are assumed to be URLs
-									if ( strpos( $val, '://' ) === false )
-										$val = '';
+									if ( strpos( $value, '://' ) === false ) {
+										$value = '';
+									}
 									break;
 							}
 						}
-						$_POST[$name] = $val;
+						$_POST[$cm_name_value] = $value;
 					}
 				}
 			}
@@ -354,199 +503,222 @@ if ( ! class_exists( 'NgfbUser' ) ) {
 				if ( get_site_option( 'initial_db_version' ) < 23588 ) {
 					$methods = array(
 						'aim'    => __( 'AIM' ),
-						'yim'    => __( 'Yahoo IM' ),
-						'jabber' => __( 'Jabber / Google Talk' )
+						'jabber' => __( 'Jabber / Google Talk' ),
+						'yim'    => __( 'Yahoo Messenger' )
 					); 
 				}
 				return apply_filters( 'user_contactmethods', $methods, $user );
 			}
 		}
 
-		public function filter_json_http_schema_org_person( $json, $use_post, $obj, $mt_og, $post_id, $author_id ) {
-			if ( $this->p->debug->enabled )
-				$this->p->debug->mark();
-
-			if ( empty( $this->p->options['schema_author_json'] ) ||
-				empty( $author_id ) )
-					return $json;
-
-			// only add the person json if the author has a website url
-			$author_website_url = get_the_author_meta( 'url', $author_id );
-			if ( strpos( $author_website_url, '://' ) === false )
-				return false;
-
-			$size_name = $this->p->cf['lca'].'-schema';
-			$og_image = $this->get_og_image( 1, $size_name, $author_id, false );
-			$json = '{
-	"@context":"http://schema.org",
-	"@type":"Person",
-	"name":"'.$this->get_author_name( $author_id, 'fullname' )."\",\n".
-	( strpos( $author_website_url, '://' ) === false ? 
-		'' : "\t\"url\":\"".$author_website_url."\",\n" ).
-	$this->p->schema->get_json_image_list( 'image', $og_image, 'og:image' ).
-	"\t\"sameAs\":[\n";
-			$url_list = '';
-			foreach ( self::get_user_id_contact_methods( $author_id ) as $id => $label ) {
-				$url = trim( get_the_author_meta( $id, $author_id ) );
-				if ( empty( $url ) )
-					continue;
-				if ( $id === $this->p->options['plugin_cm_twitter_name'] )
-					$url = 'https://twitter.com/'.preg_replace( '/^@/', '', $url );
-				if ( strpos( $url, '://' ) !== false )
-					$url_list .= "\t\t\"".$url."\",\n";
-			}
-			return $json.rtrim( $url_list, ",\n" )."\n\t]\n}\n";
-		}
-
-		// returns the facebook profile url for an author
-		// unless the pinterest crawler is detected, in which case it returns the author's name
-		public function get_author_profile_url( $author_ids, $url_field = 'og_author_field' ) {
+		// returns an array of urls (or author names for the pinterest crawler)
+		public function get_og_profile_urls( $user_ids, $crawler_name = false ) {
 			$ret = array();
-			if ( ! empty( $author_ids ) ) {
-				if ( ! is_array( $author_ids ) )
-					$author_ids = array( $author_ids );
-				foreach ( $author_ids as $author_id ) {
-					if ( ! empty( $author_id ) ) {
-						if ( SucomUtil::crawler_name( 'pinterest' ) === true )
-							$ret[] = $this->get_author_name( $author_id, $this->p->options['rp_author_name'] );
-						else $ret[] = $this->get_author_website_url( $author_id, $this->p->options[$url_field] );
-					}
-				}	
+
+			if ( empty( $user_ids ) ) {
+				return $ret;
 			}
+
+			if ( $crawler_name === false ) {
+				$crawler_name = SucomUtil::get_crawler_name();
+			}
+
+			if ( ! is_array( $user_ids ) ) {
+				$user_ids = array( $user_ids );
+			}
+
+			foreach ( $user_ids as $user_id ) {
+				if ( empty( $user_id ) ) {
+					continue;
+				}
+
+				if ( $crawler_name === 'pinterest' ) {
+					$value = $this->get_author_meta( $user_id, $this->p->options['p_author_name'] );
+				} else {
+					$value = $this->get_author_website( $user_id, $this->p->options['og_author_field'] );
+				}
+
+				if ( ! empty( $value ) ) {	// make sure we don't add empty values
+					$ret[] = $value;
+				}
+			}
+
 			return $ret;
 		}
 
-		// called from head and opengraph classes
-		public function get_author_name( $author_id, $field_id = 'display_name' ) {
-			$name = '';
-			switch ( $field_id ) {
-				case 'none':
-					break;
-				case 'fullname':
-					$name = trim( get_the_author_meta( 'first_name', $author_id ) ).' '.
-						trim( get_the_author_meta( 'last_name', $author_id ) );
-					break;
-				// sanitation controls, just in case ;-)
-				case 'user_login':
-				case 'user_nicename':
-				case 'display_name':
-				case 'nickname':
-				case 'first_name':
-				case 'last_name':
-					$name = get_the_author_meta( $field_id, $author_id );	// since wp 2.8.0 
-					break;
+		public static function get_author_id( array $mod ) {
+			$author_id = false;
+
+			if ( $mod['is_post'] ) {
+				if ( $mod['post_author'] ) {
+					$author_id = $mod['post_author'];
+				}
+			} elseif ( $mod['is_user'] ) {
+				$author_id = $mod['id'];
 			}
-			if ( $this->p->debug->enabled )
-				$this->p->debug->log( 'author_id '.$author_id.' '.$field_id.' name: '.$name );
-			return $name;
+
+			return $author_id;
 		}
 
-		// called from head and opengraph classes
-		public function get_author_website_url( $author_id, $field_id = 'url' ) {
-			$url = '';
-			switch ( $field_id ) {
-				case 'none':
-					break;
-				case 'index':
-					$url = get_author_posts_url( $author_id );
-					break;
-				default:
-					$url = get_the_author_meta( $field_id, $author_id );	// since wp 2.8.0 
-
-					// if empty or not a url, then fallback to the author index page,
-					// if the requested field is the opengraph or link author field
-					if ( empty( $url ) || ! preg_match( '/:\/\//', $url ) ) {
-						if ( $this->p->options['og_author_fallback'] && (
-							$field_id === $this->p->options['og_author_field'] || 
-							$field_id === $this->p->options['seo_author_field'] ) ) {
-
-							if ( $this->p->debug->enabled )
-								$this->p->debug->log( 'fetching the author index page url as fallback' );
-							$url = get_author_posts_url( $author_id );
-						}
-					}
-					break;
+		public function get_author_meta( $user_id, $field_id ) {
+			$value = '';
+			$is_user = SucomUtil::user_exists( $user_id );
+			if ( $is_user ) {
+				switch ( $field_id ) {
+					case 'none':
+						break;
+					case 'fullname':
+						$value = get_the_author_meta( 'first_name', $user_id ).' '.
+							get_the_author_meta( 'last_name', $user_id );
+						break;
+					case 'description':
+						$value = preg_replace( '/[\s\n\r]+/s', ' ', 
+							get_the_author_meta( $field_id, $user_id ) );
+						break;
+					default:
+						$value = get_the_author_meta( $field_id, $user_id );
+						break;
+				}
+				$value = trim( $value );	// just in case
+			} elseif ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'user id '.$user_id.' is not a wordpress user' );
 			}
 
-			if ( $this->p->debug->enabled )
-				$this->p->debug->log( 'author_id '.$author_id.' '.$field_id.' url: '.$url );
+			$value = apply_filters( $this->p->cf['lca'].'_get_author_meta', $value, $user_id, $field_id, $is_user );
 
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'user id '.$user_id.' '.$field_id.': '.$value );
+			}
+
+			return $value;
+		}
+
+		public function get_author_website( $user_id, $field_id = 'url' ) {
+			$url = '';
+			$is_user = SucomUtil::user_exists( $user_id );
+			if ( $is_user ) {
+				switch ( $field_id ) {
+					case 'none':
+						break;
+					case 'index':
+						$url = get_author_posts_url( $user_id );
+						break;
+					default:
+						$url = get_the_author_meta( $field_id, $user_id );
+	
+						// if empty or not a url, then fallback to the author index page,
+						// if the requested field is the opengraph or link author field
+						if ( empty( $url ) || ! preg_match( '/:\/\//', $url ) ) {
+							if ( $this->p->options['og_author_fallback'] && 
+								( $field_id === $this->p->options['og_author_field'] || 
+									$field_id === $this->p->options['seo_author_field'] ) ) {
+	
+								if ( $this->p->debug->enabled ) {
+									$this->p->debug->log( 'fetching the author index page url as fallback' );
+								}
+								$url = get_author_posts_url( $user_id );
+							}
+						}
+						break;
+				}
+				$url = trim( $url );	// just in case
+			} elseif ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'user id '.$user_id.' is not a wordpress user' );
+			}
+			$url = apply_filters( $this->p->cf['lca'].'_get_author_website', $url, $user_id, $field_id, $is_user );
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->log( 'user id '.$user_id.' '.$field_id.': '.$url );
+			}
 			return $url;
 		}
 
-		public function reset_metabox_prefs( $pagehook, $box_ids = array(), $meta_name = '', $section = '', $force = false ) {
+		public static function reset_metabox_prefs( $pagehook, $box_ids = array(), $meta_name = '', $context = '', $force = false ) {
 			$user_id = get_current_user_id();	// since wp 3.0
-			// define a new state to set for the box_ids given
 			switch ( $meta_name ) {
-				case 'order':	$meta_states = array( 'meta-box-order' ); break ;
-				case 'hidden':	$meta_states = array( 'metaboxhidden' ); break ;
-				case 'closed':	$meta_states = array( 'closedpostboxes' ); break ;
-				default: $meta_states = array( 'meta-box-order', 'metaboxhidden', 'closedpostboxes' ); break;
+				case 'order':
+				case 'meta-box-order':
+					$meta_states = array( 'meta-box-order' );
+					break;
+				case 'hidden':
+				case 'metaboxhidden':
+					$meta_states = array( 'metaboxhidden' );
+					break;
+				case 'closed':
+				case 'closedpostboxes':
+					$meta_states = array( 'closedpostboxes' );
+					break;
+				default:
+					$meta_states = array( 'meta-box-order', 'metaboxhidden', 'closedpostboxes' );
+					break;
 			}
 			foreach ( $meta_states as $state ) {
-				// define the meta_key for that option
 				$meta_key = $state.'_'.$pagehook; 
-				// an empty box_ids array means reset the whole page
-				if ( $force && empty( $box_ids ) )
+				if ( $force && empty( $box_ids ) ) {
 					delete_user_option( $user_id, $meta_key, true );
+				}
 				$is_changed = false;
 				$is_default = false;
-				$opts = get_user_option( $meta_key, $user_id );
-				if ( ! is_array( $opts ) ) {
+				$user_opts = get_user_option( $meta_key, $user_id );
+				if ( empty( $user_opts ) ) {
 					$is_changed = true;
 					$is_default = true;
-					$opts = array();
+					$user_opts = array();
 				}
 				if ( $is_default || $force ) {
-					foreach ( $box_ids as $id ) {
+					foreach ( $box_ids as $box_id ) {
 						// change the order only if forced (default is controlled by add_meta_box() order)
-						if ( $force && $state == 'meta-box-order' && ! empty( $opts[$section] ) ) {
+						if ( $force && $state == 'meta-box-order' && ! empty( $user_opts[$context] ) ) {
 							// don't proceed if the metabox is already first
-							if ( strpos( $opts[$section], $pagehook.'_'.$id ) !== 0 ) {
-								$boxes = explode( ',', $opts[$section] );
+							if ( strpos( $user_opts[$context], $pagehook.'_'.$box_id ) !== 0 ) {
+								$boxes = explode( ',', $user_opts[$context] );
 								// remove the box, no matter its position in the array
-								if ( $key = array_search( $pagehook.'_'.$id, $boxes ) !== false )
+								if ( $key = array_search( $pagehook.'_'.$box_id, $boxes ) !== false ) {
 									unset( $boxes[$key] );
+								}
 								// assume we want to be top-most
-								array_unshift( $boxes, $pagehook.'_'.$id );
-								$opts[$section] = implode( ',', $boxes );
+								array_unshift( $boxes, $pagehook.'_'.$box_id );
+								$user_opts[$context] = implode( ',', $boxes );
 								$is_changed = true;
 							}
 						} else {
 							// check to see if the metabox is present for that state
-							$key = array_search( $pagehook.'_'.$id, $opts );
+							$key = array_search( $pagehook.'_'.$box_id, $user_opts );
 
-							// if we're not targetting , then clear it
+							// if we're not targetting, then clear it
 							if ( empty( $meta_name ) && $key !== false ) {
-								unset( $opts[$key] );
+								unset( $user_opts[$key] );
 								$is_changed = true;
 							// otherwise if we want a state, add if it's missing
 							} elseif ( ! empty( $meta_name ) && $key === false ) {
-								$opts[] = $pagehook.'_'.$id;
+								$user_opts[] = $pagehook.'_'.$box_id;
 								$is_changed = true;
 							}
 						}
 					}
 				}
-				if ( $is_default || $is_changed )
-					update_user_option( $user_id, $meta_key, array_unique( $opts ), true );
+				if ( $is_default || $is_changed ) {
+					update_user_option( $user_id, $meta_key, array_unique( $user_opts ), true );
+				}
 			}
 		}
 
+		// called by the NgfbRegister::uninstall_plugin() method
 		public static function delete_metabox_prefs( $user_id = false ) {
+
 			$user_id = $user_id === false ? 
 				get_current_user_id() : $user_id;
+
 			$cf = NgfbConfig::get_config( false, true );
 
 			$parent_slug = 'options-general.php';
-			foreach ( array_keys( $cf['*']['lib']['setting'] ) as $id ) {
-				$menu_slug = $cf['lca'].'-'.$id;
+			foreach ( array_keys( $cf['*']['lib']['setting'] ) as $lib_id ) {
+				$menu_slug = $cf['lca'].'-'.$lib_id;
 				self::delete_metabox_pagehook( $user_id, $menu_slug, $parent_slug );
 			}
 
 			$parent_slug = $cf['lca'].'-'.key( $cf['*']['lib']['submenu'] );
-			foreach ( array_keys( $cf['*']['lib']['submenu'] ) as $id ) {
-				$menu_slug = $cf['lca'].'-'.$id;
+			foreach ( array_keys( $cf['*']['lib']['submenu'] ) as $lib_id ) {
+				$menu_slug = $cf['lca'].'-'.$lib_id;
 				self::delete_metabox_pagehook( $user_id, $menu_slug, $parent_slug );
 			}
 		}
@@ -555,28 +727,35 @@ if ( ! class_exists( 'NgfbUser' ) ) {
 			$pagehook = get_plugin_page_hookname( $menu_slug, $parent_slug);
 			foreach ( array( 'meta-box-order', 'metaboxhidden', 'closedpostboxes' ) as $state ) {
 				$meta_key = $state.'_'.$pagehook;
-				if ( $user_id !== false )
+				if ( $user_id === false ) {
+					foreach ( get_users( array( 'meta_key' => $meta_key ) ) as $user ) {
+						delete_user_option( $user->ID, $meta_key, true );
+					}
+				} elseif ( is_numeric( $user_id ) ) {
 					delete_user_option( $user_id, $meta_key, true );
-				else foreach ( get_users( array( 'meta_key' => $meta_key ) ) as $user )
-					delete_user_option( $user->ID, $meta_key, true );
+				}
 			}
 		}
 
-		public static function save_pref( $prefs, $user_id = false ) {
-			$user_id = $user_id === false ? 
-				get_current_user_id() : $user_id;
-			if ( ! current_user_can( 'edit_user', $user_id ) )
+		public static function save_pref( $user_prefs, $user_id = false ) {
+
+			$user_id = $user_id === false ? get_current_user_id() : $user_id;
+
+			if ( ! current_user_can( 'edit_user', $user_id ) ) {
 				return false;
-			if ( ! is_array( $prefs ) || empty( $prefs ) )
+			}
+
+			if ( ! is_array( $user_prefs ) || empty( $user_prefs ) ) {
 				return false;
+			}
 
 			$old_prefs = self::get_pref( false, $user_id );	// get all prefs for user
-			$new_prefs = array_merge( $old_prefs, $prefs );
+			$new_prefs = array_merge( $old_prefs, $user_prefs );
 
 			// don't bother saving unless we have to
 			if ( $old_prefs !== $new_prefs ) {
 				self::$pref[$user_id] = $new_prefs;	// update the pref cache
-				unset( $new_prefs['options_filtered'] );
+				unset( $new_prefs['prefs_filtered'] );
 				update_user_meta( $user_id, NGFB_PREF_NAME, $new_prefs );
 				return true;
 			} else return false;
@@ -585,24 +764,34 @@ if ( ! class_exists( 'NgfbUser' ) ) {
 		public static function get_pref( $idx = false, $user_id = false ) {
 			$user_id = $user_id === false ? 
 				get_current_user_id() : $user_id;
-			if ( ! isset( self::$pref[$user_id]['options_filtered'] ) || 
-				self::$pref[$user_id]['options_filtered'] !== true ) {
 
-				self::$pref[$user_id] = get_user_meta( $user_id, NGFB_PREF_NAME, true );
-				if ( ! is_array( self::$pref[$user_id] ) )
-					self::$pref[$user_id] = array();
+			if ( ! isset( self::$pref[$user_id]['prefs_filtered'] ) || self::$pref[$user_id]['prefs_filtered'] !== true ) {
 
 				$ngfb = Ngfb::get_instance();
-				if ( ! isset( self::$pref[$user_id]['show_opts'] ) )
-					self::$pref[$user_id]['show_opts'] = $ngfb->options['plugin_show_opts'];
 
-				self::$pref[$user_id]['options_filtered'] = true;
+				self::$pref[$user_id] = get_user_meta( $user_id, NGFB_PREF_NAME, true );
+
+				if ( ! is_array( self::$pref[$user_id] ) ) {
+					self::$pref[$user_id] = array();
+				}
+
+				self::$pref[$user_id]['prefs_filtered'] = true;	// set before calling filter to prevent recursion
+				self::$pref[$user_id] = apply_filters( $ngfb->cf['lca'].'_get_user_pref', self::$pref[$user_id], $user_id );
+
+				if ( ! isset( self::$pref[$user_id]['show_opts'] ) ) {
+					self::$pref[$user_id]['show_opts'] = $ngfb->options['plugin_show_opts'];
+				}
 			}
+
 			if ( $idx !== false ) {
-				if ( isset( self::$pref[$user_id][$idx] ) ) 
+				if ( isset( self::$pref[$user_id][$idx] ) ) {
 					return self::$pref[$user_id][$idx];
-				else return false;
-			} else return self::$pref[$user_id];
+				} else {
+					return false;
+				}
+			} else {
+				return self::$pref[$user_id];
+			}
 		}
 
 		public static function is_show_all( $user_id = false ) {
@@ -615,40 +804,19 @@ if ( ! class_exists( 'NgfbUser' ) ) {
 
 		// returns the value for show_opts, or return true/false if a value to compare is provided
 		public static function show_opts( $compare = false, $user_id = false ) {
-			$user_id = $user_id === false ? 
-				get_current_user_id() : $user_id;
+			$user_id = $user_id === false ? get_current_user_id() : $user_id;
 			$value = self::get_pref( 'show_opts' );
-			if ( $compare !== false )
+			if ( $compare !== false ) {
 				return $compare === $value ? true : false;
-			else return $value;
+			} else {
+				return $value;
+			}
 		}
 
 		public function clear_cache( $user_id, $rel_id = false ) {
-			$post_id = 0;
-			$lca = $this->p->cf['lca'];
-			$lang = SucomUtil::get_locale();
-			$sharing_url = $this->p->util->get_sharing_url( false );
-			$transients = array(
-				'NgfbHead::get_header_array' => array( 
-					'lang:'.$lang.'_post:'.$post_id.'_url:'.$sharing_url,
-					'lang:'.$lang.'_post:'.$post_id.'_url:'.$sharing_url.'_crawler:pinterest',
-				),
-				'NgfbMeta::get_mod_column_content' => array( 
-					'lang:'.$lang.'_id:'.$user_id.'_mod:user_column:'.$lca.'_og_image',
-					'lang:'.$lang.'_id:'.$user_id.'_mod:user_column:'.$lca.'_og_desc',
-				),
-			);
-			$transients = apply_filters( $this->p->cf['lca'].'_user_cache_transients', 
-				$transients, $user_id, $lang, $sharing_url );
-
-			$deleted = $this->p->util->clear_cache_objects( $transients );
-
-			if ( ! empty( $this->p->options['plugin_cache_info'] ) && $deleted > 0 )
-				$this->p->notice->inf( $deleted.' items removed from the WordPress object and transient caches.', true );
-
-			return $user_id;
+			$mod = $this->get_mod( $user_id );
+			$this->clear_mod_cache_types( $mod );
 		}
 	}
 }
 
-?>

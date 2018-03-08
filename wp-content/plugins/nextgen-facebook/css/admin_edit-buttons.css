@@ -1,21 +1,73 @@
-/* Save an empty style text box to reload the default example styles.
- * These styles are provided as examples only - modifications may be 
- * necessary to customize the layout for your website. Social sharing
- * buttons can be aligned vertically, horizontally, floated, etc.
+/*
+ * Save an empty style text box to reload the default example styles.
+ * These styles are provided as examples only - modifications may be
+ * necessary to customize the layout for your website.
  */
 
-/* align the buttons vertically in two 117px wide columns */
-.ngfb-admin_edit-buttons { 
-	text-align:left; 
+/* align the buttons vertically in two 116px wide columns */
+.ngfb-admin_edit-buttons {
+	text-align:left;
 }
-.ngfb-admin_edit-buttons .ngfb-buttons { 
+.ngfb-admin_edit-buttons .ngfb-buttons {
 	margin:0;
 }
-.ngfb-admin_edit-buttons .ngfb-buttons > div { 
+.ngfb-admin_edit-buttons .ngfb-buttons > div,	/* default uses small buttons */
+.ngfb-admin_edit-buttons .ngfb-preset-small_share_count .ngfb-buttons > div {
 	display:inline-block;
 	vertical-align:top;
 	padding:0;
-	margin:5px;
-	width:117px; 
+	margin:5px 0;
+	width:116px;
 	height:20px;
+}
+
+/* Non-JavaScript Buttons */
+
+.ngfb-admin_edit-buttons .ngfb-buttons div.css-button a {
+	display:inline-block;
+	line-height:20px;
+	width:60px;
+	font-size:10px;
+	border-radius:3px;
+	text-align:center;
+	text-decoration:none;
+	vertical-align:top;
+	border:0.5px solid #ddd;
+	-webkit-font-smoothing:antialiased;
+	-moz-osx-font-smoothing:grayscale;
+}
+.ngfb-admin_edit-buttons .ngfb-buttons div.css-button a .ngfb-icon {
+	fill:#ffffff;
+	vertical-align:bottom;
+}
+.ngfb-admin_edit-buttons .ngfb-buttons div.css-button a .ngfb-text {
+	color:#ffffff;
+	white-space:nowrap;
+	font-weight:bold;
+}
+
+/* E-Mail Button */
+
+.ngfb-admin_edit-buttons .ngfb-buttons div.email-button a { 
+	width:60px; 
+	background-color:#0a88ff;
+}
+.ngfb-admin_edit-buttons .ngfb-buttons div.email-button a:hover { 
+	background-color:#006ed6;
+}
+.ngfb-admin_edit-buttons .ngfb-buttons div.email-button a .ngfb-text:before { 
+	content:" E-Mail";
+}
+
+/* WhatsApp Button */
+
+.ngfb-admin_edit-buttons .ngfb-buttons div.whatsapp-button a { 
+	width:80px; 
+	background-color:#64d448;
+}
+.ngfb-admin_edit-buttons .ngfb-buttons div.whatsapp-button a:hover { 
+	background-color:#49bd2c;
+}
+.ngfb-admin_edit-buttons .ngfb-buttons div.whatsapp-button a .ngfb-text:before { 
+	content:" WhatsApp";
 }

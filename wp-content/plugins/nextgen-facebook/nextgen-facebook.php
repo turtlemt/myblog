@@ -1,24 +1,35 @@
 <?php
 /*
- * Plugin Name: NextGEN Facebook (NGFB)
+ * Plugin Name: NextGEN Facebook
  * Plugin Slug: nextgen-facebook
  * Text Domain: nextgen-facebook
  * Domain Path: /languages
- * Plugin URI: http://surniaulula.com/extend/plugins/nextgen-facebook/
+ * Plugin URI: https://surniaulula.com/extend/plugins/nextgen-facebook/
+ * Assets URI: https://surniaulula.github.io/nextgen-facebook/assets/
  * Author: JS Morisset
- * Author URI: http://surniaulula.com/
+ * Author URI: https://surniaulula.com/
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Description: Display your content in the best possible way on Facebook, Google+, Twitter, Pinterest, etc. - no matter how your webpage is shared!
- * Requires At Least: 3.1
- * Tested Up To: 4.4
- * Version: 8.21.3
- * 
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Description: Complete meta tags for the best looking shares on Facebook, Google, Pinterest, Twitter, etc - no matter how your webpage is shared!
+ * Requires PHP: 5.4
+ * Requires At Least: 3.8
+ * Tested Up To: 4.9.1
+ * WC Tested Up To: 3.2.6
+ * Version: 8.46.17
+ *
+ * Version Numbering: {major}.{minor}.{bugfix}[-{stage}.{level}]
+ *
+ *	{major}		Major structural code changes / re-writes or incompatible API changes.
+ *	{minor}		New functionality was added or improved in a backwards-compatible manner.
+ *	{bugfix}	Backwards-compatible bug fixes or small improvements.
+ *	{stage}.{level}	Pre-production release: dev < a (alpha) < b (beta) < rc (release candidate).
+ *
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'Ngfb' ) ) {
 
@@ -29,283 +40,475 @@ if ( ! class_exists( 'Ngfb' ) ) {
 		public $p;			// Ngfb
 		public $admin;			// NgfbAdmin (admin menus and page loader)
 		public $cache;			// SucomCache (object and file caching)
-		public $debug;			// SucomDebug or NgfbNoDebug
+		public $check;			// NgfbCheck
+		public $debug;			// SucomDebug or SucomNoDebug
 		public $head;			// NgfbHead
+		public $link_rel;		// NgfbLinkRel (link relation tags)
 		public $loader;			// NgfbLoader
 		public $media;			// NgfbMedia (images, videos, etc.)
 		public $msgs;			// NgfbMessages (admin tooltip messages)
-		public $notice;			// SucomNotice or NgfbNoNotice
-		public $og;			// NgfbOpengraph
-		public $tc;			// NgfbTwittercard
+		public $notice;			// SucomNotice or SucomNoNotice
+		public $og;			// NgfbOpenGraph
 		public $opt;			// NgfbOptions
+		public $page;			// NgfbPage (page title, desc, etc.)
 		public $reg;			// NgfbRegister
-		public $script;			// SucomScript (admin jquery tooltips)
+		public $script;			// NgfbScript (admin jquery tooltips)
 		public $sharing;		// NgfbSharing (wp_head and wp_footer js and buttons)
-		public $style;			// SucomStyle (admin styles)
+		public $style;			// NgfbStyle (admin styles)
+		public $tc;			// NgfbTwitterCard
 		public $util;			// NgfbUtil (extends SucomUtil)
-		public $webpage;		// SucomWebpage (title, desc, etc., plus shortcodes)
+		public $weibo;			// NgfbWeibo
 
 		/*
 		 * Reference Variables (config, options, modules, etc.)
 		 */
+		public $lca = 'ngfb';		// main plugin lowercase acronym
+		public $m = array();		// plugin modules
+		public $m_ext = array();	// plugin extension modules
 		public $cf = array();		// config array defined in construct method
-		public $is_avail = array();	// assoc array for other plugin checks
+		public $avail = array();	// assoc array for other plugin checks
 		public $options = array();	// individual blog/site options
 		public $site_options = array();	// multisite options
-		public $mods = array();		// pro and gpl modules
+		public $sc = array();		// shortcodes
 
-		protected static $instance = null;
-
-		public static function &get_instance() {
-			if ( self::$instance === null )
-				self::$instance = new self;
-			return self::$instance;
-		}
+		private static $instance;
 
 		/*
 		 * Ngfb Constructor
 		 */
 		public function __construct() {
 
-			require_once( dirname( __FILE__ ).'/lib/config.php' );
-			$this->cf = NgfbConfig::get_config();			// unfiltered - $cf['*'] array is not available yet
+			$plugin_dir = trailingslashit( dirname( __FILE__ ) );
+
+			require_once $plugin_dir.'lib/config.php';
+			$this->cf = NgfbConfig::get_config( false, false );	// unfiltered - $cf['*'] array is not available yet
 			NgfbConfig::set_constants( __FILE__ );
 			NgfbConfig::require_libs( __FILE__ );			// includes the register.php class library
 			$this->reg = new NgfbRegister( $this );			// activate, deactivate, uninstall hooks
 
-			add_action( 'init', array( &$this, 'set_config' ), -1 );
-			add_action( 'init', array( &$this, 'init_plugin' ), NGFB_INIT_PRIORITY );
-			add_action( 'widgets_init', array( &$this, 'init_widgets' ), 10 );
+			add_action( 'init', array( &$this, 'set_config' ), -10 );				// runs at init -10 (before widgets_init)
+			add_action( 'widgets_init', array( &$this, 'init_widgets' ), 10 );			// runs at init 1
+			add_action( 'init', array( &$this, 'set_options' ), NGFB_INIT_PRIORITY - 3 );		// runs at init 11 by default
+			add_action( 'init', array( &$this, 'set_objects' ), NGFB_INIT_PRIORITY - 2 );		// runs at init 12 by default
+			add_action( 'init', array( &$this, 'init_shortcodes' ), NGFB_INIT_PRIORITY - 1 );	// runs at init 13 by default
+			add_action( 'init', array( &$this, 'init_plugin' ), NGFB_INIT_PRIORITY );		// runs at init 14 by default
+
+			if ( is_admin() ) {
+				/*
+				 * The 'ngfb_init_textdomain' action is run after the debug property is defined.
+				 * Hooks the 'override_textdomain_mofile' filter (if debug is enabled) to use 
+				 * local translation files instead.
+				 */
+				add_action( 'ngfb_init_textdomain', array( __CLASS__, 'init_textdomain' ), -10, 1 );
+
+				/*
+				 * Show a deprecation message and allow the plugin to be uninstalled.
+				 * Hooks the 'current_screen' filter to handle notice messages.
+				 * Hooks the 'ngfb_init_plugin' action to handle deprecation actions.
+				 */
+				if ( ! defined( 'NGFB_DEPRECATE_DISABLE' ) || ! NGFB_DEPRECATE_DISABLE ) {
+					if ( file_exists( $plugin_dir.'lib/deprecate.php' ) ) {
+						require_once $plugin_dir.'lib/deprecate.php';	// instantiates itself
+					}
+				}
+			}
 		}
 
-		// runs at init priority -1
-		public function set_config() {
-			$this->cf = NgfbConfig::get_config( false, true );	// apply filters - define the $cf['*'] array
+		public static function &get_instance() {
+			if ( ! isset( self::$instance ) ) {
+				self::$instance = new self;
+			}
+			return self::$instance;
 		}
 
-		// runs at init priority 1
+		// runs at init priority -10
+		// called by activate_plugin() as well
+		public function set_config( $activate = false ) {
+			$this->cf = NgfbConfig::get_config( false, true );	// apply filters and define the $cf['*'] array
+		}
+
+		// runs at init 1
 		public function init_widgets() {
 			$opts = get_option( NGFB_OPTIONS_NAME );
 			if ( ! empty( $opts['plugin_widgets'] ) ) {
-				foreach ( $this->cf['plugin'] as $lca => $info ) {
+				foreach ( $this->cf['plugin'] as $ext => $info ) {
 					if ( isset( $info['lib']['widget'] ) && is_array( $info['lib']['widget'] ) ) {
 						foreach ( $info['lib']['widget'] as $id => $name ) {
-							$classname = apply_filters( $lca.'_load_lib', false, 'widget/'.$id );
-							if ( $classname !== false && class_exists( $classname ) )
-								register_widget( $classname );
+							$classname = apply_filters( $ext.'_load_lib', false, 'widget/'.$id );
+							if ( $classname !== false && class_exists( $classname ) ) {
+								register_widget( $classname );	// name of a class that extends WP_Widget
+							}
 						}
 					}
 				}
 			}
 		}
 
-		// runs at init priority 13 (by default)
-		public function init_plugin() {
-			if ( ! empty( $_SERVER['NGFB_DISABLE'] ) ) 
-				return;
+		// runs at init priority 11 by default
+		// called by activate_plugin() as well
+		public function set_options( $activate = false ) {
 
-			$this->set_objects();				// define the class object variables
+			if ( $activate && defined( 'NGFB_RESET_ON_ACTIVATE' ) && NGFB_RESET_ON_ACTIVATE ) {
+				error_log( 'NGFB_RESET_ON_ACTIVATE constant is true - reloading default settings for plugin activation' );
+				delete_option( NGFB_OPTIONS_NAME );
+			}
 
-			if ( $this->debug->enabled ) {
-				foreach ( array( 'wp_head', 'wp_footer', 'admin_head', 'admin_footer' ) as $action ) {
-					foreach ( array( -9999, 9999 ) as $prio ) {
-						add_action( $action, create_function( '', 'echo "<!-- ngfb '.
-							$action.' action hook priority '.$prio.' mark -->\n";' ), $prio );
-						add_action( $action, array( &$this, 'show_debug_html' ), $prio );
+			$this->options = get_option( NGFB_OPTIONS_NAME );
+
+			// check_options() saves the settings
+			if ( ! is_array( $this->options ) ) {
+				if ( isset( $this->cf['opt']['defaults'] ) ) {	// just in case
+					$this->options = $this->cf['opt']['defaults'];
+				} else {
+					$this->options = array();
+				}
+				// reload from filtered defaults when all classes loaded
+				$this->options['options_reload_defaults'] = true;
+			}
+
+			if ( is_multisite() ) {
+
+				$this->site_options = get_site_option( NGFB_SITE_OPTIONS_NAME );
+
+				// check_options() saves the settings
+				if ( ! is_array( $this->site_options ) ) {
+					if ( isset( $this->cf['opt']['site_defaults'] ) ) {	// just in case
+						$this->site_options = $this->cf['opt']['site_defaults'];
+					} else {
+						$this->site_options = array();
+					}
+					// reload from filtered defaults when all classes loaded
+					$this->site_options['options_reload_defaults'] = true;
+				}
+
+				// if multisite options are found, check for overwrite of site specific options
+				if ( is_array( $this->options ) && is_array( $this->site_options ) ) {
+					$blog_id = get_current_blog_id();	// since wp 3.1
+					$defined_constants = get_defined_constants( true );	// $categorize = true
+					foreach ( $this->site_options as $key => $val ) {
+						if ( strpos( $key, ':use' ) !== false ) {
+							continue;
+						}
+						if ( isset( $this->site_options[$key.':use'] ) ) {
+							switch ( $this->site_options[$key.':use'] ) {
+								case'force':
+									$this->options[$key.':is'] = 'disabled';
+									$this->options[$key] = $this->site_options[$key];
+									break;
+								case 'empty':	// blank string, null, false, or 0
+									if ( empty( $this->options[$key] ) ) {
+										$this->options[$key] = $this->site_options[$key];
+									}
+									break;
+							}
+						}
+						$constant_name = 'NGFB_ID_'.$blog_id.'_OPT_'.strtoupper( $key );
+						if ( isset( $defined_constants['user'][$constant_name] ) ) {
+							$this->options[$key] = $defined_constants['user'][$constant_name];
+						}
 					}
 				}
 			}
-			do_action( 'ngfb_init_plugin' );
 		}
 
-		public function show_debug_html() { 
-			if ( $this->debug->enabled )
-				$this->debug->show_html();
-		}
-
+		// runs at init priority 12 by default
 		// called by activate_plugin() as well
 		public function set_objects( $activate = false ) {
-			/*
-			 * basic plugin setup (settings, check, debug, notices, utils)
-			 */
-			$this->set_options();	// filter and define the $this->options and $this->site_options properties
+			
+			$network = is_multisite() ? true : false;
+
 			$this->check = new NgfbCheck( $this );
-			$this->is_avail = $this->check->get_avail();		// uses $this->options in checks
+			$this->avail = $this->check->get_avail();	// uses $this->options in checks
 
 			// configure the debug class
-			$html_debug = ! empty( $this->options['plugin_debug'] ) || 
-				( defined( 'NGFB_HTML_DEBUG' ) && NGFB_HTML_DEBUG ) ? true : false;
-			$wp_debug = defined( 'NGFB_WP_DEBUG' ) && NGFB_WP_DEBUG ? true : false;
+			if ( ! empty( $this->options['plugin_debug'] ) || ( defined( 'NGFB_HTML_DEBUG' ) && NGFB_HTML_DEBUG ) ) {
+				$html_debug = true;
+			} else {
+				$html_debug = false;
+			}
 
-			// only load the debug class if one or more debug options are enabled
-			if ( ( $html_debug || $wp_debug ) && 
-				( $classname = NgfbConfig::load_lib( false, 'com/debug', 'SucomDebug' ) ) )
-					$this->debug = new $classname( $this, array( 'html' => $html_debug, 'wp' => $wp_debug ) );
-			else $this->debug = new NgfbNoDebug();
+			if ( defined( 'NGFB_WP_DEBUG' ) && NGFB_WP_DEBUG ) {
+				$wp_debug = true;
+			} elseif ( is_admin() && defined( 'NGFB_ADMIN_WP_DEBUG' ) && NGFB_ADMIN_WP_DEBUG ) {
+				$wp_debug = true;
+			} else {
+				$wp_debug = false;
+			}
 
-			if ( $activate === true &&
-				$this->debug->enabled )
-					$this->debug->log( 'method called for plugin activation' );
+			if ( $html_debug || $wp_debug ) {
+				require_once NGFB_PLUGINDIR.'lib/com/debug.php';
+				$this->debug = new SucomDebug( $this, array( 'html' => $html_debug, 'wp' => $wp_debug ) );
+				if ( $this->debug->enabled ) {
+					global $wp_version;
+					$this->debug->log( 'debug enabled on '.date( 'c' ) );
+					$this->debug->log( 'hostname '.php_uname( 'n' ) );
+					$this->debug->log( 'WP version '.$wp_version );
+					$this->debug->log( 'PHP version '.phpversion() );
+					$this->debug->log( $this->check->get_ext_list() );
+				}
+			} else {
+				$this->debug = new SucomNoDebug();	// make sure debug property is always available
+			}
 
-			// only load the notification class in the admin interface
-			if ( is_admin() &&
-				( $classname = NgfbConfig::load_lib( false, 'com/notice', 'SucomNotice' ) ) )
-					$this->notice = new $classname( $this );
-			else $this->notice = new NgfbNoNotice();
+			do_action( 'ngfb_init_textdomain', $this->debug->enabled );
 
-			$this->util = new NgfbUtil( $this );
+			if ( is_admin() ) {
+				require_once NGFB_PLUGINDIR.'lib/com/notice.php';
+				$this->notice = new SucomNotice( $this );
+			} else {
+				$this->notice = new SucomNoNotice();	// make sure the notice property is always available
+			}
+
+			$this->util = new NgfbUtil( $this );			// extends SucomUtil
 			$this->opt = new NgfbOptions( $this );
 			$this->cache = new SucomCache( $this );			// object and file caching
-			$this->style = new SucomStyle( $this );			// admin styles
-			$this->script = new SucomScript( $this );		// admin jquery tooltips
-			$this->webpage = new SucomWebpage( $this );		// title, desc, etc., plus shortcodes
+			$this->style = new NgfbStyle( $this );			// admin styles
+			$this->script = new NgfbScript( $this );		// admin jquery tooltips
+			$this->page = new NgfbPage( $this );			// page title, desc, etc.
 			$this->media = new NgfbMedia( $this );			// images, videos, etc.
+			$this->filters = new NgfbFilters( $this );		// integration filters
 			$this->head = new NgfbHead( $this );
-			$this->og = new NgfbOpengraph( $this );
-			$this->tc = new NgfbTwittercard( $this );
-			$this->schema = new NgfbSchema( $this );
+
+			// meta tags and json-ld markup
+			$this->link_rel = new NgfbLinkRel( $this );		// link relation tags
+			$this->og = new NgfbOpenGraph( $this );			// open graph meta tags
+			$this->weibo = new NgfbWeibo( $this );			// weibo meta tags
+			$this->tc = new NgfbTwitterCard( $this );		// twitter meta tags
+			$this->schema = new NgfbSchema( $this );		// schema meta tags and json markup
 
 			if ( is_admin() ) {
 				$this->msgs = new NgfbMessages( $this );	// admin tooltip messages
 				$this->admin = new NgfbAdmin( $this );		// admin menus and page loader
 			}
 
-			if ( $this->is_avail['ssb'] )
+			if ( $this->avail['p_ext']['ssb'] ) {
 				$this->sharing = new NgfbSharing( $this );	// wp_head and wp_footer js and buttons
+			}
 
-			$this->loader = new NgfbLoader( $this, $activate );	// module loader
+			$this->loader = new NgfbLoader( $this );		// module loader
 
+			if ( $this->debug->enabled ) {
+				$this->debug->mark( 'init objects action' );	// begin timer
+			}
 			do_action( 'ngfb_init_objects', $activate );
 
-			/*
-			 * check and create the default options array
-			 * execute after all objects have been defines, so hooks into 'ngfb_get_defaults' are available
-			 */
-			if ( is_multisite() && ( ! is_array( $this->site_options ) || empty( $this->site_options ) ) )
-				$this->site_options = $this->opt->get_site_defaults();
-
-			/*
-			 * end here when called for plugin activation (the init_plugin() hook handles the rest)
-			 */
-			if ( $activate == true || ( 
-				! empty( $_GET['action'] ) && $_GET['action'] == 'activate-plugin' &&
-				! empty( $_GET['plugin'] ) && $_GET['plugin'] == NGFB_PLUGINBASE ) ) {
-				if ( $this->debug->enabled )
-					$this->debug->log( 'exiting early: init_plugin hook will follow' );
-				return;
+			if ( $this->debug->enabled ) {
+				$this->debug->mark( 'init objects action' );	// end timer
 			}
 
 			/*
-			 * check and upgrade options if necessary
+			 * set_options() may have loaded the static defaults for new or missing options.
+			 * After all objects have been loaded, and all filter / action hooks registered, 
+			 * check to see if the options need to be reloaded from the filtered defaults.
 			 */
-			$this->options = $this->opt->check_options( NGFB_OPTIONS_NAME, $this->options );
+			if ( isset( $this->options['options_reload_defaults'] ) && 
+				$this->options['options_reload_defaults'] === true ) {
+				$this->options = $this->opt->get_defaults();	// check_options() saves the settings
+			}
+			$this->options = $this->opt->check_options( NGFB_OPTIONS_NAME,
+				$this->options, $network, $activate );
 
-			if ( is_multisite() )
-				$this->site_options = $this->opt->check_options( NGFB_SITE_OPTIONS_NAME, 
-					$this->site_options, true );
+			if ( $network ) {
+				if ( isset( $this->options['options_reload_defaults'] ) && 
+					$this->options['options_reload_defaults'] === true ) {
+					$this->options = $this->opt->get_site_defaults();	// check_options() saves the settings
+				}
+				$this->site_options = $this->opt->check_options( NGFB_SITE_OPTIONS_NAME,
+					$this->site_options, $network, $activate );
+			}
 
 			/*
-			 * configure class properties based on plugin settings
+			 * Issue reminder notices and disable some caching when the plugin's debug mode is enabled.
 			 */
-			$this->cache->default_object_expire = $this->options['plugin_object_cache_exp'];
+			if ( $this->debug->enabled ) {
 
-			$this->cache->default_file_expire = ( $this->check->aop() ? 
-				( $this->debug->is_enabled( 'wp' ) ? 
-					NGFB_DEBUG_FILE_EXP : 
-					$this->options['plugin_file_cache_exp'] ) : 0 );
+				$warn_msg = '';
+				$info = $this->cf['plugin']['ngfb'];
 
-			$this->is_avail['cache']['file'] = $this->cache->default_file_expire > 0 ? true : false;
+				if ( $this->debug->is_enabled( 'wp' ) ) {
+					$this->debug->log( 'WP debug log mode is active' );
+					if ( is_admin() ) {
+						$warn_msg .= __( 'WP debug logging mode is active &mdash; debug messages are being sent to the WordPress debug log.',
+							'nextgen-facebook' ).' ';
+					}
+				}
+				
+				if ( $this->debug->is_enabled( 'html' ) ) {
+					if ( 'none' !== SucomUtil::get_crawler_name() ) {
+						$this->debug->enable( 'html', false );	// disable HTML debug messages for crawlers
+					}
+				}
 
-			// disable the transient cache if html debug mode is on
-			if ( $this->debug->is_enabled( 'html' ) === true ) {
+				if ( $this->debug->is_enabled( 'html' ) ) {
+					$this->debug->log( 'HTML debug mode is active' );
+					if ( is_admin() ) {
+						$warn_msg .= __( 'HTML debug mode is active &mdash; debug messages are being added to webpages as hidden HTML comments.',
+							'nextgen-facebook' ).' ';
+					}
+				}
 
-				$this->is_avail['cache']['transient'] = defined( 'NGFB_TRANSIENT_CACHE_DISABLE' ) &&
-					! NGFB_TRANSIENT_CACHE_DISABLE ? true : false;
+				if ( $this->debug->enabled ) {
+					if ( ! empty( $warn_msg ) ) {
+						$warn_msg .= sprintf( __( 'Debug mode disables some %s caching features, which degrades performance slightly.',
+							'nextgen-facebook' ), $info['short'] ).' '.__( 'Please disable debug mode when debugging is complete.',
+							'nextgen-facebook' );
+						$this->notice->warn( $warn_msg );
+					}
+					$this->util->disable_cache_filters();
+				}
+			}
 
-				if ( $this->debug->enabled )
-					$this->debug->log( 'html debug mode is active: transient cache use '.
-						( $this->is_avail['cache']['transient'] ? 'could not be' : 'is' ).' disabled' );
+			if ( class_exists( 'Wpsso' ) ) {	// just in case
 
-				if ( is_admin() )
-					// text_domain is already loaded by the NgfbAdmin class construct
-					$this->notice->inf( ( $this->is_avail['cache']['transient'] ?
-						__( 'HTML debug mode is active (transient cache could NOT be disabled).', 'nextgen-facebook' ) :
-						__( 'HTML debug mode is active (transient cache use is disabled).', 'nextgen-facebook' ) ).' '.
-						__( 'Informational debug messages are being added as hidden HTML comments.', 'nextgen-facebook' ) );
+				$info = $this->cf['plugin']['ngfb'];
+				$alt_name = 'WPSSO Core';
+				$die_msg = __( '%1$s is a newer fork / child of %2$s and is already active &mdash; the two plugins cannot be active at the same time. %2$s has been deactivated.', 'nextgen-facebook' );
+				$err_msg = __( '%1$s is a newer fork / child of %2$s and the two plugins cannot be active at the same time. <a href="%3$s">Please deactivate and uninstall the %2$s plugin</a>.', 'nextgen-facebook' );
+
+				if ( $activate ) {	// wpsso found on plugin activation
+					if ( ! function_exists( 'deactivate_plugins' ) ) {
+						require_once trailingslashit( ABSPATH ).'wp-admin/includes/plugin.php';
+					}
+					deactivate_plugins( $info['base'], true );	// $silent = true
+					wp_die( '<p>'.sprintf( $die_msg, $alt_name, $info['name'] ).'</p>' );
+				} else {
+					if ( $this->debug->enabled ) {
+						$this->debug->log( 'wpsso class detected - disabling a selection of features' );
+					}
+					if ( is_admin() ) {
+						$deactivate_url = wp_nonce_url( 'plugins.php?action=deactivate&amp;'.
+							'plugin='.$info['base'].'&amp;plugin_status=active&amp;paged=1&amp;s=',
+								'deactivate-plugin_'.$info['base'] );
+						$this->notice->err( sprintf( $err_msg, $alt_name, $info['name'], $deactivate_url ) );
+					}
+					add_filter( 'ngfb_add_head_html', '__return_false' );
+					add_filter( 'ngfb_add_schema_head_attributes', '__return_false' );
+					add_filter( 'ngfb_sharing_buttons_html', '__return_false' );
+				}
 			}
 		}
 
-		public function set_options() {
-			$this->options = get_option( NGFB_OPTIONS_NAME );
+		// runs at init priority 13 by default
+		public function init_shortcodes() {
+			if ( ! empty( $this->options['plugin_shortcodes'] ) ) {
+				foreach ( $this->cf['plugin'] as $ext => $info ) {
+					if ( isset( $info['lib']['shortcode'] ) && is_array( $info['lib']['shortcode'] ) ) {
+						foreach ( $info['lib']['shortcode'] as $id => $name ) {
+							$classname = apply_filters( $ext.'_load_lib', false, 'shortcode/'.$id );
+							if ( $classname !== false && class_exists( $classname ) ) {
+								$this->sc[$id] = new $classname( $this );
+							}
+						}
+					}
+				}
+			}
+		}
 
-			// look for alternate options name
-			if ( ! is_array( $this->options ) ) {
-				if ( defined( 'NGFB_OPTIONS_NAME_ALT' ) && NGFB_OPTIONS_NAME_ALT ) {
-					$this->options = get_option( NGFB_OPTIONS_NAME_ALT );
-					if ( is_array( $this->options ) ) {
-						// auto-creates options with autoload = yes
-						update_option( NGFB_OPTIONS_NAME, $this->options );
-						delete_option( NGFB_OPTIONS_NAME_ALT );
+		// runs at init priority 14 by default
+		public function init_plugin() {
+
+			if ( $this->debug->enabled ) {
+				$this->debug->mark( 'plugin initialization' );	// begin timer
+			}
+
+			if ( $this->debug->enabled ) {
+				foreach ( array( 'wp_head', 'wp_footer', 'admin_head', 'admin_footer' ) as $action ) {
+					foreach ( array( -9000, 9000 ) as $prio ) {
+						add_action( $action, create_function( '',
+							'echo "<!-- ngfb '.$action.' action hook priority '.$prio.' mark -->\n";' ), $prio );
+						add_action( $action, array( &$this, 'show_debug' ), $prio + 1 );
+					}
+				}
+				foreach ( array( 'wp_footer', 'admin_footer' ) as $action ) {
+					foreach ( array( 9900 ) as $prio ) {
+						add_action( $action, array( &$this, 'show_config' ), $prio );
 					}
 				}
 			}
 
-			if ( ! is_array( $this->options ) )
-				$this->options = array();
+			if ( $this->debug->enabled ) {
+				$this->debug->log( 'running init_plugin action' );
+			}
+
+			do_action( 'ngfb_init_plugin' );
+
+			if ( $this->debug->enabled ) {
+				$this->debug->mark( 'plugin initialization' );	// end timer
+			}
+		}
+
+		// runs at ngfb_init_textdomain priority -10
+		public static function init_textdomain( $debug_enabled ) {
+			if ( $debug_enabled ) {
+				add_filter( 'load_textdomain_mofile', 
+					array( self::get_instance(), 'override_textdomain_mofile' ), 10, 3 );
+			}
+			load_plugin_textdomain( 'nextgen-facebook', false, 'nextgen-facebook/languages/' );
+		}
+
+		// only runs when debug is enabled
+		public function override_textdomain_mofile( $wp_mofile, $domain ) {
+			if ( strpos( $domain, 'nextgen-facebook' ) === 0 ) {	// optimize
+				foreach ( $this->cf['plugin'] as $ext => $info ) {
+					if ( $info['slug'] === $domain ) {
+						$constant_name = strtoupper( $ext ).'_PLUGINDIR';
+						if ( defined( $constant_name ) && $plugin_dir = constant( $constant_name ) ) {
+							$plugin_mofile = $plugin_dir.'languages/'.basename( $wp_mofile );
+							if ( $plugin_mofile !== $wp_mofile && is_readable( $plugin_mofile ) ) {
+								global $l10n;
+								unset( $l10n[$domain] );	// prevent merging
+								return $plugin_mofile;
+							}
+						}
+						break;	// stop here
+					}
+				}
+			}
+			return $wp_mofile;
+		}
+
+		// only runs when debug is enabled
+		public function show_debug() { 
+			$this->debug->show_html( null, 'debug log' );
+		}
+
+		// only runs when debug is enabled
+		public function show_config() { 
+
+			if ( ! $this->debug->enabled ) {	// just in case
+				return;
+			}
+
+			// show constants
+			$defined_constants = get_defined_constants( true );
+			$defined_constants['user']['NGFB_NONCE_NAME'] = '********';
 
 			if ( is_multisite() ) {
-				$this->site_options = get_site_option( NGFB_SITE_OPTIONS_NAME );
-
-				// look for alternate site options name
-				if ( ! is_array( $this->site_options ) ) {
-					if ( defined( 'NGFB_SITE_OPTIONS_NAME_ALT' ) && NGFB_SITE_OPTIONS_NAME_ALT ) {
-						$this->site_options = get_site_option( NGFB_SITE_OPTIONS_NAME_ALT );
-						if ( is_array( $this->site_options ) ) {
-							update_site_option( NGFB_SITE_OPTIONS_NAME, $this->site_options );
-							delete_site_option( NGFB_SITE_OPTIONS_NAME_ALT );
-						}
-					}
-				}
-
-				// if multisite options are found, check for overwrite of site specific options
-				if ( is_array( $this->options ) && is_array( $this->site_options ) ) {
-					$current_blog_id = function_exists( 'get_current_blog_id' ) ? 
-						get_current_blog_id() : false;
-					foreach ( $this->site_options as $key => $val ) {
-						if ( isset( $this->site_options[$key.':use'] ) &&
-							isset( $this->options[$key] ) ) {
-
-							switch ( $this->site_options[$key.':use'] ) {
-								case'force':
-									$this->options[$key.':is'] = 'disabled';
-									$this->options[$key] = $this->site_options[$key];
-									break;
-								case 'empty':
-									if ( empty( $this->options[$key] ) )
-										$this->options[$key] = $this->site_options[$key];
-									break;
-							}
-
-							// check for constant over-rides
-							if ( $current_blog_id !== false ) {
-								$constant_name = 'NGFB_OPTIONS_'.$current_blog_id.'_'.strtoupper( $key );
-								if ( defined( $constant_name ) )
-									$this->options[$key] = constant( $constant_name );
-							}
-						}
-					}
-				}
+				$this->debug->show_html( SucomUtil::preg_grep_keys( '/^(MULTISITE|^SUBDOMAIN_INSTALL|.*_SITE)$/', 
+					$defined_constants['user'] ), 'multisite constants' );
 			}
 
-			if ( ! is_array( $this->site_options ) )
-				$this->site_options = array();
+			$this->debug->show_html( SucomUtil::preg_grep_keys( '/^NGFB_/', $defined_constants['user'] ), 'ngfb constants' );
 
-			// just in case
-			unset( $this->options['options_filtered'],
-				$this->site_options['options_filtered'] );
+			// show active plugins
+			$this->debug->show_html( print_r( SucomUtil::active_plugins(), true ), 'active plugins' );
 
-			$this->options = apply_filters( 'ngfb_get_options', $this->options );
-			$this->site_options = apply_filters( 'ngfb_get_site_options', $this->site_options );
+			// show available modules
+			$this->debug->show_html( print_r( $this->avail, true ), 'available features' );
+
+			// show all plugin options
+			$opts = $this->options;
+			foreach ( $opts as $key => $val ) {
+				switch ( $key ) {
+					case ( strpos( $key, '_js_' ) !== false ? true : false ):
+					case ( strpos( $key, '_css_' ) !== false ? true : false ):
+					case ( preg_match( '/(_css|_js|_html)$/', $key ) ? true : false ):
+					case ( preg_match( '/_(key|secret|tid|token)$/', $key ) ? true : false ):
+						$opts[$key] = '[removed]';
+						break;
+				}
+			}
+			$this->debug->show_html( $opts, 'ngfb settings' );
 		}
 	}
 
@@ -313,26 +516,3 @@ if ( ! class_exists( 'Ngfb' ) ) {
 	$ngfb =& Ngfb::get_instance();
 }
 
-if ( ! class_exists( 'NgfbNoDebug' ) ) {
-	class NgfbNoDebug {
-		public $enabled = false;
-		public function mark() { return; }
-		public function args() { return; }
-		public function log() { return; }
-		public function show_html() { return; }
-		public function get_html() { return; }
-		public function is_enabled() { return false; }
-	}
-}
-
-if ( ! class_exists( 'NgfbNoNotice' ) ) {
-	class NgfbNoNotice {
-		public function nag() { return; }
-		public function inf() { return; }
-		public function err() { return; }
-		public function log() { return; }
-		public function trunc() { return; }
-	}
-}
-
-?>

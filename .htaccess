@@ -1,4 +1,8 @@
-
+php_flag display_startup_errors off
+php_flag display_errors off
+php_flag html_errors off
+php_value error_reporting -1
+php_value log_errors_max_len 0
 # BEGIN WordPress
 
 # END WordPress

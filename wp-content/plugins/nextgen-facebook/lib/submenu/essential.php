@@ -1,162 +1,155 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbSubmenuEssential' ) && class_exists( 'NgfbAdmin' ) ) {
 
 	class NgfbSubmenuEssential extends NgfbAdmin {
 
-		public function __construct( &$plugin, $id, $name, $lib ) {
+		public function __construct( &$plugin, $id, $name, $lib, $ext ) {
 			$this->p =& $plugin;
-			if ( $this->p->debug->enabled )
+
+			if ( $this->p->debug->enabled ) {
 				$this->p->debug->mark();
+			}
+
 			$this->menu_id = $id;
 			$this->menu_name = $name;
 			$this->menu_lib = $lib;
+			$this->menu_ext = $ext;	// lowercase acronyn for plugin or extension
 		}
 
+		// called by the extended NgfbAdmin class
 		protected function add_meta_boxes() {
-			// add_meta_box( $id, $title, $callback, $post_type, $context, $priority, $callback_args );
+			$this->maybe_show_language_notice();
+
 			add_meta_box( $this->pagehook.'_general',
-				_x( 'General Settings', 'metabox title', 'nextgen-facebook' ), 
+				_x( 'Essential General Settings', 'metabox title', 'nextgen-facebook' ),
 					array( &$this, 'show_metabox_general' ), $this->pagehook, 'normal' );
 
 			add_meta_box( $this->pagehook.'_advanced',
-				_x( 'Advanced Settings', 'metabox title', 'nextgen-facebook' ), 
+				_x( 'Optional Advanced Settings', 'metabox title', 'nextgen-facebook' ),
 					array( &$this, 'show_metabox_advanced' ), $this->pagehook, 'normal' );
 
 			// issues a warning notice if the default image size is too small
-			if ( ! SucomUtil::get_const( 'NGFB_CHECK_DEFAULT_IMAGE' ) )
-				$og_image = $this->p->media->get_default_image( 1, $this->p->cf['lca'].'-opengraph', false );
+			// unless the NGFB_CHECK_DEFAULT_IMAGE constant has been defined as false
+			if ( SucomUtil::get_const( 'NGFB_CHECK_DEFAULT_IMAGE' ) !== false ) {
+				$this->p->media->get_default_images( 1, $this->p->cf['lca'].'-opengraph', false );
+			}
 		}
 
 		public function show_metabox_general() {
-			$metabox = $this->menu_id;
+			$metabox_id = $this->menu_id;
 			$key = 'general';
-			$rows[$key] = array_merge( $this->get_rows( $metabox, $key ),
-				apply_filters( $this->p->cf['lca'].'_'.$metabox.'_'.$key.'_rows',
-					array(), $this->form, false ) );        // $network = false
-			$this->p->util->do_table_rows( $rows[$key], 'metabox-'.$metabox.'-'.$key );
+			$this->p->util->do_table_rows( apply_filters( $this->p->cf['lca'].'_'.$metabox_id.'_'.$key.'_rows',
+				$this->get_table_rows( $metabox_id, $key ), $this->form, false ), 'metabox-'.$metabox_id.'-'.$key );
 		}
 
 		public function show_metabox_advanced() {
-			$metabox = $this->menu_id;
+			$metabox_id = $this->menu_id;
 			$key = 'advanced';
-			$rows[$key] = array_merge( $this->get_rows( $metabox, $key ),
-				apply_filters( $this->p->cf['lca'].'_'.$metabox.'_'.$key.'_rows',
-					array(), $this->form, false ) );        // $network = false
-			$this->p->util->do_table_rows( $rows[$key], 'metabox-'.$metabox.'-'.$key );
+			$this->p->util->do_table_rows( apply_filters( $this->p->cf['lca'].'_'.$metabox_id.'_'.$key.'_rows',
+				$this->get_table_rows( $metabox_id, $key ), $this->form, false ), 'metabox-'.$metabox_id.'-'.$key );
 		}
 
-		protected function get_rows( $metabox, $key ) {
-			$rows = array();
-			switch ( $metabox.'-'.$key ) {
+		protected function get_table_rows( $metabox_id, $key ) {
+			$table_rows = array();
+			switch ( $metabox_id.'-'.$key ) {
 				case 'essential-general':
 
-					$rows[] = '<td></td><td class="subsection top"><h4>'.
+					$table_rows['subsection_site_information'] = '<td></td><td class="subsection top"><h4>'.
 						_x( 'Site Information', 'metabox title', 'nextgen-facebook' ).'</h4></td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Default Article Topic',
-						'option label', 'nextgen-facebook' ), null, 'og_art_section' ).
-					'<td>'.$this->form->get_select( 'og_art_section', $this->p->util->get_topics() ).'</td>';
-
-					$rows[] = $this->p->util->get_th( _x( 'Site Name',
-						'option label', 'nextgen-facebook' ), null, 'og_site_name', array( 'is_locale' => true ) ).
-					'<td>'.$this->form->get_input( SucomUtil::get_locale_key( 'og_site_name' ), 
+					$table_rows['site_name'] = $this->form->get_th_html( _x( 'WebSite Name',
+						'option label', 'nextgen-facebook' ), null, 'site_name', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'site_name', $this->p->options ),
 						null, null, null, get_bloginfo( 'name', 'display' ) ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Site Description',
-						'option label', 'nextgen-facebook' ), null, 'og_site_description', array( 'is_locale' => true ) ).
-					'<td>'.$this->form->get_textarea( SucomUtil::get_locale_key( 'og_site_description' ), 
+					$table_rows['site_desc'] = $this->form->get_th_html( _x( 'WebSite Description',
+						'option label', 'nextgen-facebook' ), null, 'site_desc', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_textarea( SucomUtil::get_key_locale( 'site_desc', $this->p->options ),
 						null, null, null, get_bloginfo( 'description', 'display' ) ).'</td>';
 
-					$rows[] = '<td></td><td class="subsection"><h4>'.
+					$table_rows['og_art_section'] = $this->form->get_th_html( _x( 'Default Article Topic',
+						'option label', 'nextgen-facebook' ), null, 'og_art_section' ).
+					'<td>'.$this->form->get_select( 'og_art_section', $this->p->util->get_article_topics() ).'</td>';
+
+					$table_rows['subsection_opengraph'] = '<td></td><td class="subsection"><h4>'.
 						_x( 'Facebook / Open Graph', 'metabox title', 'nextgen-facebook' ).'</h4></td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Facebook Business Page URL',
-						'option label', 'nextgen-facebook' ), null, 'fb_publisher_url' ).
-					'<td>'.$this->form->get_input( 'fb_publisher_url', 'wide' ).'</td>';
+					$table_rows['fb_publisher_url'] = $this->form->get_th_html( _x( 'Facebook Business Page URL',
+						'option label', 'nextgen-facebook' ), null, 'fb_publisher_url', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'fb_publisher_url', $this->p->options ), 'wide' ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Facebook Application ID',
+					$table_rows['fb_app_id'] = $this->form->get_th_html( _x( 'Facebook Application ID',
 						'option label', 'nextgen-facebook' ), null, 'fb_app_id' ).
 					'<td>'.$this->form->get_input( 'fb_app_id' ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'or Facebook Admin Username(s)',
+					$table_rows['fb_admins'] = $this->form->get_th_html( _x( 'or Facebook Admin Username(s)',
 						'option label', 'nextgen-facebook' ), null, 'fb_admins' ).
 					'<td>'.$this->form->get_input( 'fb_admins' ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Default Content Language',
-						'option label', 'nextgen-facebook' ), null, 'fb_lang' ).
-					'<td>'.$this->form->get_select( 'fb_lang', SucomUtil::get_pub_lang( 'facebook' ) ).'</td>';
-
-					$rows[] = $this->p->util->get_th( _x( 'Default / Fallback Image ID',
+					$table_rows['og_def_img_id'] = $this->form->get_th_html( _x( 'Default / Fallback Image ID',
 						'option label', 'nextgen-facebook' ), null, 'og_def_img_id' ).
-					'<td>'.$this->form->get_image_upload_input( 'og_def_img' ).'</td>';
+					'<td>'.$this->form->get_input_image_upload( 'og_def_img' ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'or Default / Fallback Image URL',
+					$table_rows['og_def_img_url'] = $this->form->get_th_html( _x( 'or Default / Fallback Image URL',
 						'option label', 'nextgen-facebook' ), null, 'og_def_img_url' ).
-					'<td>'.$this->form->get_image_url_input( 'og_def_img' ).'</td>';
+					'<td>'.$this->form->get_input_image_url( 'og_def_img' ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Open Graph Image Dimensions',
-						'option label', 'nextgen-facebook' ), null, 'og_img_dimensions' ).
-					'<td>'.$this->form->get_image_dimensions_input( 'og_img', false, false ).'</td>';
-
-					$rows[] = '<td></td><td class="subsection"><h4>'.
+					$table_rows['subsection_google_schema'] = '<td></td><td class="subsection"><h4>'.
 						_x( 'Google / Schema', 'metabox title', 'nextgen-facebook' ).'</h4></td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Google+ Business Page URL',
-						'option label', 'nextgen-facebook' ), null, 'google_publisher_url' ).
-					'<td>'.$this->form->get_input( 'seo_publisher_url', 'wide' ).'</td>';
+					$table_rows['seo_publisher_url'] = $this->form->get_th_html( _x( 'Google+ Business Page URL',
+						'option label', 'nextgen-facebook' ), null, 'seo_publisher_url', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'seo_publisher_url', $this->p->options ), 'wide' ).'</td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Website / Business Logo URL',
-						'option label', 'nextgen-facebook' ), null, 'google_schema_logo_url' ).
-					'<td>'.$this->form->get_input( 'schema_logo_url', 'wide' ).'</td>';
+					$this->add_schema_knowledge_graph_table_rows( $table_rows );
 
-					$rows[] = '<td></td><td class="subsection"><h4>'.
+					$table_rows['schema_logo_url'] = $this->form->get_th_html(
+						'<a href="https://developers.google.com/structured-data/customize/logos">'.
+						_x( 'Organization Logo URL', 'option label', 'nextgen-facebook' ).'</a>',
+							'', 'schema_logo_url', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'schema_logo_url', $this->p->options ), 'wide' ).'</td>';
+
+					$table_rows['schema_banner_url'] = $this->form->get_th_html( _x( 'Organization Banner URL',
+						'option label', 'nextgen-facebook' ), '', 'schema_banner_url', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'schema_banner_url', $this->p->options ), 'wide' ).'</td>';
+
+					$table_rows['subsection_pinterest'] = '<td></td><td class="subsection"><h4>'.
 						_x( 'Pinterest', 'metabox title', 'nextgen-facebook' ).'</h4></td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Pinterest Company Page URL',
-						'option label', 'nextgen-facebook' ), null, 'rp_publisher_url'  ).
-					'<td>'.$this->form->get_input( 'rp_publisher_url', 'wide' ).'</td>';
+					$table_rows['p_publisher_url'] = $this->form->get_th_html( _x( 'Pinterest Company Page URL',
+						'option label', 'nextgen-facebook' ), null, 'p_publisher_url', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'p_publisher_url', $this->p->options ), 'wide' ).'</td>';
 
-					if ( ! SucomUtil::get_const( 'NGFB_RICH_PIN_DISABLE' ) ) {
-						$rows[] = $this->p->util->get_th( _x( 'Rich Pin Image Dimensions',
-							'option label', 'nextgen-facebook' ), null, 'rp_img_dimensions' ).
-						'<td>'.$this->form->get_image_dimensions_input( 'rp_img' ).'</td>';
-					}
-
-					$rows[] = '<td></td><td class="subsection"><h4>'.
+					$table_rows['subsection_twitter'] = '<td></td><td class="subsection"><h4>'.
 						_x( 'Twitter', 'metabox title', 'nextgen-facebook' ).'</h4></td>';
 
-					$rows[] = $this->p->util->get_th( _x( 'Twitter Business @username',
-						'option label', 'nextgen-facebook' ), null, 'tc_site' ).
-					'<td>'.$this->form->get_input( 'tc_site' ).'</td>';
+					$table_rows['tc_site'] = $this->form->get_th_html( _x( 'Twitter Business @username',
+						'option label', 'nextgen-facebook' ), null, 'tc_site', array( 'is_locale' => true ) ).
+					'<td>'.$this->form->get_input( SucomUtil::get_key_locale( 'tc_site', $this->p->options ) ).'</td>';
 
 					break;
 
 				case 'essential-advanced':
 
-					$rows['plugin_preserve'] = $this->p->util->get_th( _x( 'Preserve Settings on Uninstall',
-						'option label', 'nextgen-facebook' ), null, 'plugin_preserve' ).
-					'<td>'.$this->form->get_checkbox( 'plugin_preserve' ).'</td>';
+					$this->add_essential_advanced_table_rows( $table_rows );
 
-					$rows['plugin_debug'] = $this->p->util->get_th( _x( 'Add Hidden Debug Messages', 
-						'option label', 'nextgen-facebook' ), null, 'plugin_debug' ).
-					'<td>'.( SucomUtil::get_const( 'NGFB_HTML_DEBUG' ) ? 
-						$this->form->get_no_checkbox( 'plugin_debug' ).' NGFB_HTML_DEBUG constant enabled' :
-						$this->form->get_checkbox( 'plugin_debug' ) ).'</td>';
+					unset ( $table_rows['plugin_shortcodes'] );
+					unset ( $table_rows['plugin_widgets'] );
 
 					break;
 			}
-			return $rows;
+			return $table_rows;
 		}
 	}
 }
 
-?>

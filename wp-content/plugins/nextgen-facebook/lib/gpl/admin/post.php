@@ -1,12 +1,13 @@
 <?php
 /*
  * License: GPLv3
- * License URI: http://www.gnu.org/licenses/gpl.txt
- * Copyright 2012-2016 Jean-Sebastien Morisset (http://surniaulula.com/)
+ * License URI: https://www.gnu.org/licenses/gpl.txt
+ * Copyright 2012-2017 Jean-Sebastien Morisset (https://surniaulula.com/)
  */
 
-if ( ! defined( 'ABSPATH' ) ) 
+if ( ! defined( 'ABSPATH' ) ) {
 	die( 'These aren\'t the droids you\'re looking for...' );
+}
 
 if ( ! class_exists( 'NgfbGplAdminPost' ) ) {
 
@@ -14,165 +15,133 @@ if ( ! class_exists( 'NgfbGplAdminPost' ) ) {
 
 		public function __construct( &$plugin ) {
 			$this->p =& $plugin;
-			$this->p->util->add_plugin_filters( $this, array( 
-				'post_header_rows' => 3,
-				'post_media_rows' => 3,
+
+			if ( $this->p->debug->enabled ) {
+				$this->p->debug->mark();
+			}
+
+			$this->p->util->add_plugin_filters( $this, array(
+				'post_text_rows' => 4,	// $table_rows, $form, $head, $mod
 			) );
 		}
 
-		public function filter_post_header_rows( $rows, $form, $head_info ) {
-			$post_status = get_post_status( $head_info['post_id'] );
-			$post_type = get_post_type( $head_info['post_id'] );
+		public function filter_post_text_rows( $table_rows, $form, $head, $mod ) {
+			if ( $this->p->debug->enabled )
+				$this->p->debug->mark();
 
-			$rows[] = '<td colspan="2" align="center">'.
-				$this->p->msgs->get( 'pro-feature-msg' ).'</td>';
+			$og_type = isset( $head['og:type'] ) ?	// just in case
+				$head['og:type'] : 'website';
 
-			$rows[] = $this->p->util->get_th( _x( 'Article Topic',
-				'option label', 'nextgen-facebook' ), 'medium', 'post-og_art_section', $head_info ).
-			'<td class="blank">'.$this->p->options['og_art_section'].'</td>';
+			$table_rows[] = '<td colspan="2" align="center">'.
+				$this->p->msgs->get( 'pro-about-msg-post-text' ).
+				$this->p->msgs->get( 'pro-feature-msg' ).
+				'</td>';
 
-			if ( $post_status == 'auto-draft' )
-				$rows[] = $this->p->util->get_th( _x( 'Default Title',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-og_title', $head_info ). 
-				'<td class="blank"><em>Save a draft version or publish the '.
-					$head_info['ptn'].' to update and display this value.</em></td>';
-			else
-				$rows[] = $this->p->util->get_th( _x( 'Default Title',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-og_title', $head_info ). 
-				'<td class="blank">'.$this->p->webpage->get_title( $this->p->options['og_title_len'],
-					'...', true, true, false, true, 'none' ).'</td>';	// $use_post = true, $md_idx = 'none'
-		
-			if ( $post_status == 'auto-draft' )
-				$rows[] = $this->p->util->get_th( _x( 'Default (Facebook / Open Graph, LinkedIn, Pinterest Rich Pin) Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'post-og_desc', $head_info ).
-				'<td class="blank"><em>Save a draft version or publish the '.
-					$head_info['ptn'].' to update and display this value.</em></td>';
-			else
-				$rows[] = $this->p->util->get_th( _x( 'Default (Facebook / Open Graph, LinkedIn, Pinterest Rich Pin) Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'post-og_desc', $head_info ).
-				'<td class="blank">'.$this->p->webpage->get_description( $this->p->options['og_desc_len'],
-					'...', true, true, true, true, 'none' ).'</td>';	// $use_post = true, $md_idx = 'none'
-	
-			if ( $post_status == 'auto-draft' )
-				$rows[] = $this->p->util->get_th( _x( 'Google / Schema Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-schema_desc', $head_info ).
-				'<td class="blank"><em>Save a draft version or publish the '.
-					$head_info['ptn'].' to update and display this value.</em></td>';
-			else
-				$rows[] = $this->p->util->get_th( _x( 'Google / Schema Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-schema_desc', $head_info ).
-				'<td class="blank">'.$this->p->webpage->get_description( $this->p->options['schema_desc_len'], 
-					'...', true ).'</td>';
-	
-			if ( $post_status == 'auto-draft' )
-				$rows[] = $this->p->util->get_th( _x( 'Google Search / SEO Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-seo_desc', $head_info ).
-				'<td class="blank"><em>Save a draft version or publish the '.
-					$head_info['ptn'].' to update and display this value.</em></td>';
-			else
-				$rows[] = $this->p->util->get_th( _x( 'Google Search / SEO Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-seo_desc', $head_info ).
-				'<td class="blank">'.$this->p->webpage->get_description( $this->p->options['seo_desc_len'], 
-					'...', true, true, false ).'</td>';			// $add_hashtags = false
+			$form_rows = array(
+				'og_art_section' => array(
+					'tr_class' => ( $og_type === 'article' ? '' : 'hide_in_basic' ),	// hide if not an article
+					'label' => _x( 'Article Topic', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'post-og_art_section', 'td_class' => 'blank',
+					'content' => $form->get_no_select( 'og_art_section',
+						$this->p->util->get_article_topics(), '', '', false ),
+				),
+				'og_title' => array(
+					'label' => _x( 'Default Title', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-og_title', 'td_class' => 'blank',
+					'no_auto_draft' => true,
+					'content' => $form->get_no_input_value( $this->p->page->get_title( $this->p->options['og_title_len'],
+						'...', $mod, true, false, true, 'none' ), 'wide' ),	// $md_idx = 'none'
+				),
+				'og_desc' => array(
+					'label' => _x( 'Default Description (Facebook / Open Graph, LinkedIn, Pinterest Rich Pin)', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'post-og_desc', 'td_class' => 'blank',
+					'no_auto_draft' => true,
+					'content' => $form->get_no_textarea_value( $this->p->page->get_description( $this->p->options['og_desc_len'],
+						'...', $mod, true, true, true, 'none' ), '', '', $this->p->options['og_desc_len'] ),	// $md_idx = 'none'
+				),
+				'seo_desc' => array(
+					'tr_class' => ( $this->p->options['add_meta_name_description'] ? '' : 'hide_in_basic' ),
+					'label' => _x( 'Google Search / SEO Description', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-seo_desc', 'td_class' => 'blank',
+					'no_auto_draft' => true,
+					'content' => $form->get_no_textarea_value( $this->p->page->get_description( $this->p->options['seo_desc_len'],
+						'...', $mod, true, false ), '', '', $this->p->options['seo_desc_len'] ),	// $add_hashtags = false
+				),
+				'tc_desc' => array(
+					'label' => _x( 'Twitter Card Description', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-tc_desc', 'td_class' => 'blank',
+					'no_auto_draft' => true,
+					'content' => $form->get_no_textarea_value( $this->p->page->get_description( $this->p->options['tc_desc_len'],
+						'...', $mod ), '', '', $this->p->options['tc_desc_len'] ),
+				),
+				'sharing_url' => array(
+					'tr_class' => 'hide_in_basic',
+					'label' => _x( 'Sharing URL', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-sharing_url', 'td_class' => 'blank',
+					'no_auto_draft' => ( $mod['post_type'] === 'attachment' ? false : true ),
+					'content' => $form->get_no_input_value( $this->p->util->get_sharing_url( $mod, false ), 'wide' ),	// $add_page = false
+				),
+			);
 
-			if ( $post_status == 'auto-draft' )
-				$rows[] = $this->p->util->get_th( _x( 'Twitter Card Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-tc_desc', $head_info ).
-				'<td class="blank"><em>Save a draft version or publish the '.
-					$head_info['ptn'].' to update and display this value.</em></td>';
-			else
-				$rows[] = $this->p->util->get_th( _x( 'Twitter Card Description',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-tc_desc', $head_info ).
-				'<td class="blank">'.$this->p->webpage->get_description( $this->p->options['tc_desc_len'],
-					'...', true ).'</td>';
-
-			if ( $post_type === 'attachment' ||
-				$post_status !== 'auto-draft' ) {
-
-				$rows[] = '<tr class="hide_in_basic">'.
-				$this->p->util->get_th( _x( 'Sharing URL',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-sharing_url', $head_info ).
-				'<td class="blank">'.$this->p->util->get_sharing_url( true ).'</td>';	// use_post = true
-			} else {
-				$rows[] = '<tr class="hide_in_basic">'.
-				$this->p->util->get_th( _x( 'Sharing URL',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-sharing_url', $head_info ).
-				'<td class="blank"><em>Save a draft version or publish the '.
-					$head_info['ptn'].' to update and display this value.</em></td>';
-			}
-			return $rows;
-		}
-
-		public function filter_post_media_rows( $rows, $form, $head_info ) {
-
-			$rows[] = '<td colspan="2" align="center">'.
-				$this->p->msgs->get( 'pro-feature-msg' ).'</td>';
-
-			$rows[] = '<td></td><td class="subsection top"><h4>'.
-				_x( 'All Social Websites / Open Graph',
-					'metabox title', 'nextgen-facebook' ).'</h4></td>';
-
-			$rows[] = '<tr class="hide_in_basic">'.
-			$this->p->util->get_th( _x( 'Image Dimensions',
-				'option label', 'nextgen-facebook' ), 'medium', 'og_img_dimensions' ).
-			'<td class="blank">'.$form->get_image_dimensions_text( 'og_img', true ).'</td>';
-
-			$rows[] = $this->p->util->get_th( _x( 'Image ID',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_img_id', $head_info ).
-			'<td class="blank">&nbsp;</td>';
-
-			$rows[] = $this->p->util->get_th( _x( 'or an Image URL',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_img_url', $head_info ).
-			'<td class="blank">&nbsp;</td>';
-
-			$rows[] = '<tr class="hide_in_basic">'.
-			$this->p->util->get_th( _x( 'Maximum Images',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_img_max', $head_info ).
-			'<td class="blank">'.$this->p->options['og_img_max'].'</td>';
-
-			$rows[] = $this->p->util->get_th( _x( 'Video Embed HTML',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_vid_embed', $head_info ).
-			'<td class="blank">&nbsp;</td>';
-
-			$rows[] = $this->p->util->get_th( _x( 'or a Video URL',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_vid_url', $head_info ).
-			'<td class="blank">&nbsp;</td>';
-
-			$rows[] = '<tr class="hide_in_basic">'.
-			$this->p->util->get_th( _x( 'Maximum Videos',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_vid_max', $head_info ).
-			'<td class="blank">'.$this->p->options['og_vid_max'].'</td>';
-
-			$rows[] = $this->p->util->get_th( _x( 'Include Preview Image(s)',
-				'option label', 'nextgen-facebook' ), 'medium', 'meta-og_vid_prev_img', $head_info ).
-			'<td class="blank">'.$form->get_no_checkbox( 'og_vid_prev_img' ).'</td>';
-
-			if ( ! SucomUtil::get_const( 'NGFB_RICH_PIN_DISABLE' ) ) {
-
-				$rows[] = '<tr class="hide_in_basic">'.
-				'<td></td><td class="subsection"><h4>'.
-					_x( 'Pinterest / Rich Pin',
-						'metabox title', 'nextgen-facebook' ).'</h4></td>';
-
-				$rows[] = '<tr class="hide_in_basic">'.
-				$this->p->util->get_th( _x( 'Image Dimensions',
-					'option label', 'nextgen-facebook' ), 'medium', 'rp_img_dimensions' ).
-				'<td class="blank">'.$form->get_image_dimensions_text( 'rp_img', true ).'</td>';
-	
-				$rows[] = '<tr class="hide_in_basic">'.
-				$this->p->util->get_th( _x( 'Image ID',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-rp_img_id', $head_info ).
-				'<td class="blank">&nbsp;</td>';
-	
-				$rows[] = '<tr class="hide_in_basic">'.
-				$this->p->util->get_th( _x( 'or an Image URL',
-					'option label', 'nextgen-facebook' ), 'medium', 'meta-rp_img_url', $head_info ).
-				'<td class="blank">&nbsp;</td>';
+			if ( $og_type === 'product' ) {
+				$form_rows['product_avail'] = array(
+					'label' => _x( 'Product Availability', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_avail', 'td_class' => 'blank',
+					'content' => $form->get_no_select( 'product_avail',
+						$this->p->cf['form']['item_availability'] ),
+				);
+				$form_rows['product_brand'] = array(
+					'label' => _x( 'Product Brand', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_brand', 'td_class' => 'blank',
+					'content' => $form->get_no_input( 'product_brand', '', '', true ),	// $placeholder = true for default value
+				);
+				$form_rows['product_color'] = array(
+					'label' => _x( 'Product Color', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_color', 'td_class' => 'blank',
+					'content' => $form->get_no_input( 'product_color', '', '', true ),	// $placeholder = true for default value
+				);
+				$form_rows['product_condition'] = array(
+					'label' => _x( 'Product Condition', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_condition', 'td_class' => 'blank',
+					'content' => $form->get_no_select( 'product_condition',
+						$this->p->cf['form']['item_condition'] ),
+				);
+				$form_rows['product_material'] = array(
+					'label' => _x( 'Product Material', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_material', 'td_class' => 'blank',
+					'content' => $form->get_no_input( 'product_material', '', '', true ),	// $placeholder = true for default value
+				);
+				// product price and currency
+				$form_rows['product_price'] = array(
+					'label' => _x( 'Product Price', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_price', 'td_class' => 'blank',
+					'content' => $form->get_no_input( 'product_price', '', '', true ).' '.	// $placeholder = true for default value
+						$form->get_no_select( 'product_currency', SucomUtil::get_currency_abbrev(), 'currency' ),
+				);
+				$form_rows['product_size'] = array(
+					'label' => _x( 'Product Size', 'option label', 'nextgen-facebook' ),
+					'th_class' => 'medium', 'tooltip' => 'meta-product_size', 'td_class' => 'blank',
+					'content' => $form->get_no_input( 'product_size', '', '', true ),	// $placeholder = true for default value
+				);
 			}
 
-			return $rows;
+			$form_rows['subsection_schema'] = array(
+				'td_class' => 'subsection', 'header' => 'h4',
+				'label' => _x( 'Structured Data / Schema Markup', 'metabox title', 'nextgen-facebook' )
+			);
+			$form_rows['schema_desc'] = array(
+				'label' => _x( 'Schema Description', 'option label', 'nextgen-facebook' ),
+				'th_class' => 'medium', 'tooltip' => 'meta-schema_desc', 'td_class' => 'blank',
+				'no_auto_draft' => true,
+				'content' => $form->get_no_textarea_value( $this->p->page->get_description( $this->p->options['schema_desc_len'],
+					'...', $mod ), '', '', $this->p->options['schema_desc_len'] ),
+			);
+
+			$auto_draft_msg = sprintf( __( 'Save a draft version or publish the %s to update this value.',
+				'nextgen-facebook' ), SucomUtil::titleize( $mod['post_type'] ) );
+
+			return $form->get_md_form_rows( $table_rows, $form_rows, $head, $mod, $auto_draft_msg );
 		}
 	}
 }
 
-?>
